@@ -59,6 +59,7 @@ async function handleSweep(request: NextRequest) {
       autoSend: true,
       digest: true,
       prune: true,
+      staleProspects: true,
       ...parseSweepParts(request.nextUrl.searchParams.get("parts")),
     } satisfies SweepParts;
 

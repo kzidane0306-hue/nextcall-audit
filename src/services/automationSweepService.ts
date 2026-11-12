@@ -4,6 +4,7 @@ import { followUpAutomationService } from "@/services/followUpAutomationService"
 import { autoSendService, AutoSendReport } from "@/services/autoSendService";
 import { dailyDigestService } from "@/services/dailyDigestService";
 import { notificationService } from "@/services/notificationService";
+import { prospectPersistenceService } from "@/services/prospectPersistenceService";
 import { getScreenshotUploadsCollection } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/errors";
@@ -29,6 +30,7 @@ export interface AutomationSweepResult {
   digest: { sent: boolean };
   prunedNotifications: number;
   prunedScreenshots: number;
+  deletedStaleProspects: number;
   durationMs: number;
   ran: string[];
   error?: string;
@@ -40,6 +42,7 @@ export interface SweepParts {
   autoSend: boolean;
   digest: boolean;
   prune: boolean;
+  staleProspects: boolean;
 }
 
 const ALL_PARTS: SweepParts = {
@@ -47,6 +50,7 @@ const ALL_PARTS: SweepParts = {
   autoSend: true,
   digest: true,
   prune: true,
+  staleProspects: true,
 };
 
 /** Parses "autoSend,followUps" from a query string; null when absent. */
@@ -64,6 +68,7 @@ export function parseSweepParts(raw: string | null): Partial<SweepParts> | null 
     autoSend: wanted.has("autosend"),
     digest: wanted.has("digest"),
     prune: wanted.has("prune"),
+    staleProspects: wanted.has("staleprospects"),
   };
 }
 
@@ -78,6 +83,7 @@ export async function runAutomationSweep(
     digest: { sent: false },
     prunedNotifications: 0,
     prunedScreenshots: 0,
+    deletedStaleProspects: 0,
     durationMs: 0,
     ran: [],
   };
@@ -109,6 +115,17 @@ export async function runAutomationSweep(
       result.ran.push("prune");
       result.prunedNotifications = await notificationService.prune(30);
       result.prunedScreenshots = await pruneStaleScreenshots();
+    }
+    if (parts.staleProspects) {
+      result.ran.push("staleProspects");
+      // The operator's rule: a prospect that sat in the pipeline a full month
+      // without a single email is dead weight — delete the row (the business
+      // and its audits stay). Bounded per sweep so a huge backlog can never
+      // stall the pass.
+      const cleaned = await prospectPersistenceService.deleteStaleUncontacted({
+        olderThanDays: 30,
+      });
+      result.deletedStaleProspects = cleaned.deleted;
     }
   } catch (error) {
     result.ok = false;

@@ -129,6 +129,58 @@ export class ProspectPersistenceService {
   /**
    * Fetches all prospects, optionally filtered by status.
    */
+  /**
+   * Pipeline housekeeping: prospects that have sat UNCONTACTED (no email ever
+   * sent to them) longer than `olderThanDays` are deleted — the operator's
+   * rule: a lead that waited a month without a sendable address is dead
+   * weight. Only the prospect row goes; the business and its audits stay.
+   */
+  async deleteStaleUncontacted(
+    options: { olderThanDays?: number; maxDelete?: number } = {}
+  ): Promise<{ deleted: number; samples: string[] }> {
+    const olderThanDays = Math.max(1, options.olderThanDays ?? 30);
+    const maxDelete = Math.max(1, options.maxDelete ?? 200);
+    const cutoffMs = Date.now() - olderThanDays * 86_400_000;
+
+    try {
+      const collection = await getProspectsCollection();
+      const rows = (await collection
+        .find({ outreachState: "UNCONTACTED" }, { limit: 500 })
+        .toArray()) as unknown as { id?: string; businessName?: string; createdAt?: string }[];
+
+      const stale = rows.filter((row) => {
+        const created = Date.parse(row.createdAt ?? "");
+        return Number.isFinite(created) && created < cutoffMs && Boolean(row.id);
+      });
+
+      if (stale.length === 0) return { deleted: 0, samples: [] };
+
+      let deleted = 0;
+      const samples: string[] = [];
+      for (const row of stale.slice(0, maxDelete)) {
+        try {
+          await collection.deleteOne({ id: row.id });
+          deleted += 1;
+          if (samples.length < 5) {
+            samples.push(row.businessName ?? String(row.id));
+          }
+        } catch (error) {
+          logger.warn(
+            `[Prospects] Could not delete stale prospect ${row.id}:`,
+            getErrorMessage(error)
+          );
+        }
+      }
+      logger.info(
+        `[Prospects] Stale-cleanup: ${deleted} UNCONTACTED prospect(s) older than ${olderThanDays} day(s) deleted.`
+      );
+      return { deleted, samples };
+    } catch (error) {
+      logger.warn("[Prospects] Stale-cleanup failed:", getErrorMessage(error));
+      return { deleted: 0, samples: [] };
+    }
+  }
+
   async getAllProspects(statusFilter?: PipelineStatus): Promise<Prospect[]> {
     try {
       const collection = await getProspectsCollection();
