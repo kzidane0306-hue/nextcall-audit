@@ -369,7 +369,31 @@ export default function ScreenshotClient() {
       formData.append("google", googleFile);
       if (facebookFile) formData.append("facebook", facebookFile);
 
-      const response = await fetch("/api/businesses/manual", { method: "POST", body: formData });
+      // The free Render instance can hiccup for a few seconds while it
+      // restarts or wakes up — the proxy answers 502/503 with an HTML page,
+      // which used to surface the misleading "screenshots could not be read"
+      // message even though nothing was ever read (queueing is AI-free).
+      // Retry transient failures automatically; a handled 4xx is a real
+      // answer and must reach the operator as-is.
+      let response: Response | null = null;
+      let transient: unknown = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const candidate = await fetch("/api/businesses/manual", { method: "POST", body: formData });
+          if (candidate.ok || (candidate.status >= 400 && candidate.status < 500)) {
+            response = candidate;
+            break;
+          }
+          transient = new Error(`HTTP ${candidate.status}`);
+        } catch (err) {
+          transient = err;
+        }
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, attempt === 1 ? 2500 : 6000));
+        }
+      }
+      if (!response) throw transient ?? new Error("The app did not answer.");
+
       const data = await response.json().catch(() => ({}));
 
       if (response.status === 409 && data.duplicate) {
@@ -380,7 +404,7 @@ export default function ScreenshotClient() {
       }
 
       if (!response.ok) {
-        const message: string = data.error ?? "The screenshots could not be read. Please try again.";
+        const message: string = data.error ?? "The server did not answer after three tries. Press ADD TO QUEUE again — your screenshots are still here.";
         setError(message);
         toast.error("Could not queue this business", message);
         return;
