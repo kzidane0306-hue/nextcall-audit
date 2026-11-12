@@ -4,5 +4,7 @@ export async function register() {
     startAutomationScheduler();
     const { startEngineKeepAlive } = await import("@/services/engineKeepAlive");
     startEngineKeepAlive();
+    const { startSelfCron } = await import("@/services/selfCron");
+    startSelfCron();
   }
 }
