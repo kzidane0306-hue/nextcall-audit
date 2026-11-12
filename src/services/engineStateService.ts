@@ -4,6 +4,7 @@ import { getSettingsCollection } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/errors";
 import { jobQueueService } from "@/services/jobQueueService";
+import { autoSendService } from "@/services/autoSendService";
 
 /**
  * The engine switch — one switch that decides whether the background
@@ -204,16 +205,20 @@ class EngineStateService {
 
   /**
    * How much background work is still waiting? The engine must outlive the
-   * dashboard while the queue is busy — the operator closes the app and goes
-   * to sleep, and the audits/reports still have to finish. An idle queue does
-   * not keep the engine (or the always-awake Render instance) alive.
+   * dashboard while work is busy — the operator closes the app and goes to
+   * sleep, and the audits/reports AND the email backlog still have to finish.
+   * An idle queue with nothing sendable does not keep the engine (or the
+   * always-awake Render instance) alive.
    */
   private async pendingWorkCount(): Promise<number> {
     try {
-      const stats = await jobQueueService.stats();
-      return (stats.QUEUED ?? 0) + (stats.RUNNING ?? 0);
+      const [stats, pendingSends] = await Promise.all([
+        jobQueueService.stats(),
+        autoSendService.countPendingSends(),
+      ]);
+      return (stats.QUEUED ?? 0) + (stats.RUNNING ?? 0) + pendingSends;
     } catch (error) {
-      logger.warn("[Engine] Could not read the job queue:", getErrorMessage(error));
+      logger.warn("[Engine] Could not read the pending work:", getErrorMessage(error));
       return 0;
     }
   }

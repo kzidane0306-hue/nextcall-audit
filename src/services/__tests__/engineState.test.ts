@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 // here. The queue mock is what simulates "background work is pending".
 const mocks = vi.hoisted(() => ({
   stats: vi.fn(async () => ({ QUEUED: 0, RUNNING: 0, DONE: 0, FAILED: 0, DEAD: 0 })),
+  pendingSends: vi.fn(async () => 0),
 }));
 
 vi.mock('@/lib/db', async () => {
@@ -15,6 +16,10 @@ vi.mock('@/lib/db', async () => {
 
 vi.mock('@/services/jobQueueService', () => ({
   jobQueueService: { stats: mocks.stats },
+}));
+
+vi.mock('@/services/autoSendService', () => ({
+  autoSendService: { countPendingSends: mocks.pendingSends },
 }));
 
 import {
@@ -139,6 +144,9 @@ describe('isAutomationLive (engine + queue integration)', () => {
 
   beforeEach(async () => {
     mocks.stats.mockReset();
+    mocks.stats.mockResolvedValue({ QUEUED: 0, RUNNING: 0, DONE: 0, FAILED: 0, DEAD: 0 });
+    mocks.pendingSends.mockReset();
+    mocks.pendingSends.mockResolvedValue(0);
     await settings().deleteMany({});
   });
 
@@ -154,6 +162,16 @@ describe('isAutomationLive (engine + queue integration)', () => {
     const age = Date.now() - new Date(String(stored.lastHeartbeatAt)).getTime();
     expect(age).toBeLessThan(60_000);
     expect(stored.on).toBe(true);
+  });
+
+  it('keeps a stale engine alive while emails are waiting, even with an empty job queue', async () => {
+    await seedEngine(true, 4 * 60 * 60_000);
+    mocks.stats.mockResolvedValue({ QUEUED: 0, RUNNING: 0, DONE: 40, FAILED: 0, DEAD: 0 });
+    mocks.pendingSends.mockResolvedValue(30);
+
+    const live = await engineStateService.isAutomationLive();
+    expect(live.live).toBe(true);
+    expect(live.reason).toBe('work-pending');
   });
 
   it('auto-turns-off a stale engine once the queue is empty', async () => {

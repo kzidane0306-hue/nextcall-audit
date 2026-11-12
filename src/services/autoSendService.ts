@@ -16,6 +16,7 @@ import {
 import { emailQuotaService } from "@/services/emailQuotaService";
 import { describeCapacity } from "@/lib/emailRouting";
 import { logger } from "@/lib/logger";
+import { getErrorMessage } from "@/lib/errors";
 
 /**
  * Auto-send pass: emails the initial audit to brand-new prospects that are
@@ -79,6 +80,52 @@ export function isProviderLimitError(error: string | null | undefined): boolean 
 }
 
 class AutoSendService {
+  /**
+   * How many emails are actually sendable right now? The engine's work-aware
+   * liveness calls this: while sendable candidates wait, the operator may
+   * close the laptop and the backlog still has to go out at one email per
+   * pass. Every guard of runPass is mirrored here, so a pass that would do
+   * nothing can never keep the engine (or the Render instance) awake — and an
+   * email-less candidate is NOT work, because sending would skip it forever.
+   */
+  async countPendingSends(): Promise<number> {
+    try {
+      const settings = await automationSettingsService.getSettingsOrDefaults();
+      if (!settings.autoSendEnabled || settings.dryRun) return 0;
+
+      const hour = currentHourInTimezone(settings.timezone);
+      if (!isWithinBusinessHours(settings, hour)) return 0;
+
+      const sentToday = await outreachPersistenceService.countSentSince(startOfUtcDayIso());
+      if (settings.dailyCap - sentToday <= 0) return 0;
+
+      const sendPlan = await emailQuotaService.getSendPlan();
+      if (sendPlan.length === 0) return 0;
+
+      const prospects = await prospectPersistenceService.getAllProspects();
+      const candidates = prospects.filter(
+        (p) =>
+          p.pipelineStatus === "NEW" &&
+          p.outreachState === "UNCONTACTED" &&
+          !p.isSuppressed
+      );
+
+      let sendable = 0;
+      for (const prospect of candidates) {
+        if (prospect.contactEmail) {
+          sendable += 1;
+          continue;
+        }
+        const business = await persistenceService.getBusinessById(prospect.businessId);
+        if (pickBestEmailForBusiness(business)) sendable += 1;
+      }
+      return sendable;
+    } catch (error) {
+      logger.warn("[AutoSendService] Could not count pending sends:", getErrorMessage(error));
+      return 0;
+    }
+  }
+
   async runPass(options: { maxSends?: number } = {}): Promise<AutoSendReport> {
     const maxSends = Math.max(0, options.maxSends ?? MAX_SENDS_PER_PASS);
     const settings = await automationSettingsService.getSettingsOrDefaults();
