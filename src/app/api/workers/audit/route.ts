@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { env } from "@/lib/env";
 import { authorizeSweep } from "@/lib/sweepAuth";
 import { logger } from "@/lib/logger";
+import { selfOrigin } from "@/lib/appOrigin";
 import { getErrorMessage } from "@/lib/errors";
 import { warmRouter } from "@/lib/ai/warmup";
 import { jobQueueService } from "@/services/jobQueueService";
@@ -253,7 +254,8 @@ export async function POST(request: NextRequest) {
     // send pass enforces its own 60s minimum gap, so an external send cron
     // can never double-send with this ping.
     try {
-      const sendUrl = `${new URL(request.url).origin}/api/workers/send`;
+      const chainOrigin = selfOrigin(new URL(request.url).origin);
+      const sendUrl = `${chainOrigin}/api/workers/send`;
       void fetch(sendUrl, {
         method: "POST",
         headers: { "x-cron-secret": process.env.CRON_SECRET ?? "" },

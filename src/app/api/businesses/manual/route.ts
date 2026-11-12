@@ -4,6 +4,7 @@ import { getScreenshotUploadsCollection } from "@/lib/db";
 import { jobQueueService } from "@/services/jobQueueService";
 import { warmRouterInBackground } from "@/lib/ai/warmup";
 import { logger } from "@/lib/logger";
+import { selfOrigin } from "@/lib/appOrigin";
 import { rateLimit } from "@/lib/rateLimiter";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
     // cron may be a lazy 1-5 minute cadence, and a freshly queued job should
     // not wait for it. Fire-and-forget — when the engine is off, the worker's
     // own gate answers and nothing runs until the operator switches on again.
-    void fetch(`${new URL(request.url).origin}/api/workers/audit`, {
+    void fetch(`${selfOrigin(new URL(request.url).origin)}/api/workers/audit`, {
       method: "POST",
       headers: { "x-cron-secret": process.env.CRON_SECRET ?? "" },
     }).catch(() => undefined);
