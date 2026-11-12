@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ENGINE_LIVE_TTL_MS,
   EngineState,
-  engineLiveReason,
   engineStateService,
 } from "@/services/engineStateService";
 import { logger } from "@/lib/logger";
@@ -24,16 +23,17 @@ export const dynamic = "force-dynamic";
  */
 
 async function statusPayload() {
+  // isAutomationLive also knows about pending background work: while jobs wait
+  // or run, the engine stays ON even when the dashboard is closed.
+  const live = await engineStateService.isAutomationLive();
   const state: EngineState = await engineStateService.getState();
-  const now = Date.now();
-  const reason = engineLiveReason(state, now);
 
   return {
     ttlMs: ENGINE_LIVE_TTL_MS,
     engine: {
       on: state.on,
-      live: reason === "on",
-      reason,
+      live: live.live,
+      reason: live.reason,
       lastHeartbeatAt: state.lastHeartbeatAt,
       lastOffAt: state.lastOffAt,
       lastOffReason: state.lastOffReason,

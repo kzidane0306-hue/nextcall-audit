@@ -3,6 +3,7 @@ import "server-only";
 import { getSettingsCollection } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/errors";
+import { jobQueueService } from "@/services/jobQueueService";
 
 /**
  * The engine switch — one switch that decides whether the background
@@ -54,11 +55,11 @@ export interface EngineState {
 }
 
 export interface EngineLive {
-  /** True only when the switch is ON *and* the heartbeat is fresh. */
+  /** True when the switch is ON and the heartbeat is fresh OR jobs are pending. */
   live: boolean;
   /** Raw switch position (may be ON with an expired heartbeat). */
   on: boolean;
-  /** "on" | "off" | "auto-off" | "stale-heartbeat" | "no-heartbeat" | "storage-error" */
+  /** "on" | "work-pending" | "off" | "auto-off" | "stale-heartbeat" | "no-heartbeat" | "storage-error" */
   reason: string;
   lastHeartbeatAt: string | null;
 }
@@ -103,6 +104,37 @@ function toState(raw: unknown): EngineState {
     lastOffReason: typeof doc.lastOffReason === "string" ? doc.lastOffReason : null,
     updatedAt: typeof doc.updatedAt === "string" ? doc.updatedAt : null,
   };
+}
+
+export interface LivenessDecision {
+  live: boolean;
+  reason: string;
+  /** True when the heartbeat must be rolled because real work is pending. */
+  keepAlive: boolean;
+}
+
+/**
+ * Pure: should the engine count as live right now?
+ *
+ *   - OFF stays OFF — pending work never resurrects a switch the operator
+ *     turned off.
+ *   - A fresh heartbeat is live.
+ *   - A STALE heartbeat is still live while jobs wait or run: the operator
+ *     queues a batch, closes the laptop and sleeps, and the workers must
+ *     finish that batch before the engine (and the Render instance) may idle
+ *     out.
+ *   - A stale heartbeat with an empty queue expires (auto-off).
+ */
+export function decideLiveness(
+  state: EngineState,
+  now: number,
+  pendingJobs: number
+): LivenessDecision {
+  const reason = engineLiveReason(state, now);
+  if (!state.on) return { live: false, reason, keepAlive: false };
+  if (reason === "on") return { live: true, reason, keepAlive: false };
+  if (pendingJobs > 0) return { live: true, reason: "work-pending", keepAlive: true };
+  return { live: false, reason, keepAlive: false };
 }
 
 class EngineStateService {
@@ -171,6 +203,22 @@ class EngineStateService {
   }
 
   /**
+   * How much background work is still waiting? The engine must outlive the
+   * dashboard while the queue is busy — the operator closes the app and goes
+   * to sleep, and the audits/reports still have to finish. An idle queue does
+   * not keep the engine (or the always-awake Render instance) alive.
+   */
+  private async pendingWorkCount(): Promise<number> {
+    try {
+      const stats = await jobQueueService.stats();
+      return (stats.QUEUED ?? 0) + (stats.RUNNING ?? 0);
+    } catch (error) {
+      logger.warn("[Engine] Could not read the job queue:", getErrorMessage(error));
+      return 0;
+    }
+  }
+
+  /**
    * The gate every scheduled caller runs through. Fails closed: when storage
    * cannot be read, the scheduled pass does not run (manual actions are not
    * gated and keep working).
@@ -185,12 +233,24 @@ class EngineStateService {
     }
 
     const now = Date.now();
-    const reason = engineLiveReason(state, now);
-    const live = reason === "on";
+    // Only an ON engine pays for the queue lookup.
+    const pending = state.on ? await this.pendingWorkCount() : 0;
+    const decision = decideLiveness(state, now, pending);
+
+    if (decision.keepAlive) {
+      // Work is still running: roll the heartbeat so the window keeps
+      // covering the job, not the operator's bedtime.
+      try {
+        state = await this.writeState({ lastHeartbeatAt: new Date().toISOString() });
+      } catch (error) {
+        logger.warn("[Engine] Could not roll the heartbeat for pending work:", getErrorMessage(error));
+      }
+      logger.info(`[Engine] ${pending} job(s) pending — engine kept alive past the idle window.`);
+    }
 
     // Stamp the auto-off so the dashboard can show why it went dark. Cheap and
     // idempotent — several callers may stamp the same transition.
-    if (state.on && !live) {
+    if (state.on && !decision.live) {
       try {
         await this.turnOff(ENGINE_AUTO_OFF_REASON);
       } catch (error) {
@@ -198,7 +258,7 @@ class EngineStateService {
       }
     }
 
-    return { live, on: state.on, reason, lastHeartbeatAt: state.lastHeartbeatAt };
+    return { live: decision.live, on: state.on, reason: decision.reason, lastHeartbeatAt: state.lastHeartbeatAt };
   }
 }
 

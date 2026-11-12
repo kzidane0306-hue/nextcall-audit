@@ -1,20 +1,31 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-// The pure helpers are what the workers' gate leans on — test them without a
-// database (the service itself is covered by the engine API's fail-closed
-// behaviour, not here).
-vi.mock('@/lib/db', () => ({
-  getSettingsCollection: async () => {
-    throw new Error('not used in this test');
-  },
+// The gate reads the settings document and the job queue; both are isolated
+// here. The queue mock is what simulates "background work is pending".
+const mocks = vi.hoisted(() => ({
+  stats: vi.fn(async () => ({ QUEUED: 0, RUNNING: 0, DONE: 0, FAILED: 0, DEAD: 0 })),
+}));
+
+vi.mock('@/lib/db', async () => {
+  const { getMemoryDb } = await import('@/lib/memoryDb');
+  return {
+    getSettingsCollection: async () => getMemoryDb().collection('settings'),
+  };
+});
+
+vi.mock('@/services/jobQueueService', () => ({
+  jobQueueService: { stats: mocks.stats },
 }));
 
 import {
   ENGINE_LIVE_TTL_MS,
+  decideLiveness,
   defaultEngineState,
   engineLiveReason,
+  engineStateService,
   isHeartbeatFresh,
 } from '@/services/engineStateService';
+import { getMemoryDb } from '@/lib/memoryDb';
 
 const NOW = Date.parse('2026-11-10T10:00:00.000Z');
 
@@ -64,5 +75,105 @@ describe('engineLiveReason', () => {
   it('says "on" only for ON with a fresh heartbeat', () => {
     const state = { ...defaultEngineState(), on: true, lastHeartbeatAt: '2026-11-10T09:45:00.000Z' };
     expect(engineLiveReason(state, NOW)).toBe('on');
+  });
+});
+
+describe('decideLiveness (work-aware engine)', () => {
+  const fresh = {
+    ...defaultEngineState(),
+    on: true,
+    lastHeartbeatAt: new Date(NOW - 5 * 60_000).toISOString(),
+  };
+  const stale = {
+    ...defaultEngineState(),
+    on: true,
+    lastHeartbeatAt: new Date(NOW - 4 * 60 * 60_000).toISOString(),
+  };
+  const off = { ...defaultEngineState(), on: false };
+
+  it('stays live on a fresh heartbeat', () => {
+    expect(decideLiveness(fresh, NOW, 0)).toEqual({ live: true, reason: 'on', keepAlive: false });
+  });
+
+  it('stays live with pending jobs even after the heartbeat expired (overnight batch)', () => {
+    const decision = decideLiveness(stale, NOW, 6);
+    expect(decision.live).toBe(true);
+    expect(decision.reason).toBe('work-pending');
+    expect(decision.keepAlive).toBe(true);
+  });
+
+  it('expires a stale heartbeat once the queue is empty', () => {
+    const decision = decideLiveness(stale, NOW, 0);
+    expect(decision.live).toBe(false);
+    expect(decision.keepAlive).toBe(false);
+  });
+
+  it('never resurrects a switch that is OFF', () => {
+    expect(decideLiveness(off, NOW, 99)).toEqual({ live: false, reason: 'off', keepAlive: false });
+  });
+});
+
+describe('isAutomationLive (engine + queue integration)', () => {
+  const settings = () => getMemoryDb().collection('settings') as unknown as {
+    findOne: (f: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+    updateOne: (f: Record<string, unknown>, u: Record<string, unknown>, o?: { upsert?: boolean }) => Promise<unknown>;
+    deleteMany: (f: Record<string, unknown>) => Promise<unknown>;
+  };
+
+  async function seedEngine(on: boolean, heartbeatAgoMs: number) {
+    await settings().updateOne(
+      { id: 'engine-state' },
+      {
+        $set: {
+          id: 'engine-state',
+          on,
+          lastHeartbeatAt: new Date(Date.now() - heartbeatAgoMs).toISOString(),
+          lastOffAt: null,
+          lastOffReason: null,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  beforeEach(async () => {
+    mocks.stats.mockReset();
+    await settings().deleteMany({});
+  });
+
+  it('keeps a stale engine alive while jobs are pending, and rolls the heartbeat', async () => {
+    await seedEngine(true, 4 * 60 * 60_000);
+    mocks.stats.mockResolvedValue({ QUEUED: 3, RUNNING: 1, DONE: 0, FAILED: 0, DEAD: 0 });
+
+    const live = await engineStateService.isAutomationLive();
+    expect(live.live).toBe(true);
+    expect(live.reason).toBe('work-pending');
+
+    const stored = (await settings().findOne({ id: 'engine-state' })) as Record<string, unknown>;
+    const age = Date.now() - new Date(String(stored.lastHeartbeatAt)).getTime();
+    expect(age).toBeLessThan(60_000);
+    expect(stored.on).toBe(true);
+  });
+
+  it('auto-turns-off a stale engine once the queue is empty', async () => {
+    await seedEngine(true, 4 * 60 * 60_000);
+    mocks.stats.mockResolvedValue({ QUEUED: 0, RUNNING: 0, DONE: 9, FAILED: 0, DEAD: 0 });
+
+    const live = await engineStateService.isAutomationLive();
+    expect(live.live).toBe(false);
+
+    const stored = (await settings().findOne({ id: 'engine-state' })) as Record<string, unknown>;
+    expect(stored.on).toBe(false);
+    expect(String(stored.lastOffReason)).toContain('auto-off');
+  });
+
+  it('never resurrects an operator-switched-OFF engine', async () => {
+    await seedEngine(false, 4 * 60 * 60_000);
+    mocks.stats.mockResolvedValue({ QUEUED: 5, RUNNING: 2, DONE: 0, FAILED: 0, DEAD: 0 });
+
+    const live = await engineStateService.isAutomationLive();
+    expect(live.live).toBe(false);
+    expect(live.on).toBe(false);
   });
 });
