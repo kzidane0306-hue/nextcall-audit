@@ -118,7 +118,7 @@ export default function PipelineClient() {
         const requestId = ++latestRequestId.current;
         const fetchProspects = async () => {
             try {
-                const response = await fetch(`/api/prospects?view=${activeFilter}`);
+                const response = await fetch(`/api/prospects?view=${activeFilter}&limit=200`);
                 if (!response.ok) throw new Error("Failed to fetch pipeline");
 
                 const data = await response.json();

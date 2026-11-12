@@ -194,7 +194,12 @@ async function loadPage(view: string, limit: number): Promise<ProspectRow[]> {
   }
 
   const collection = await getProspectsCollection();
-  const rows = await collection.find(filterForView(view), { limit }).toArray();
+  // Newest first: the operator adds audits all day, and an unsorted Find
+  // returns an arbitrary slab of the collection — which is exactly how fresh
+  // prospects used to vanish from the Pipeline (it showed 100 of 680).
+  const rows = await collection
+    .find(filterForView(view), { sort: { createdAt: -1 }, limit })
+    .toArray();
   return rows as unknown as ProspectRow[];
 }
 
