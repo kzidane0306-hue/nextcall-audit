@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import {
   getAuditJobsCollection,
   getAuditsCollection,
@@ -15,6 +15,7 @@ import { emailQuotaService } from "@/services/emailQuotaService";
 import { outreachPersistenceService } from "@/services/outreachPersistenceService";
 import { totalRemaining } from "@/lib/emailRouting";
 import type { AppNotification, AuditJob, Prospect } from "@/types";
+import { cachedFor } from "@/lib/serverCache";
 import ConsoleClock from "@/components/console/ConsoleClock";
 import {
   BarRow,
@@ -62,30 +63,51 @@ const TONE_CLASS: Record<string, string> = {
   red: "text-[#ff5f56]",
 };
 
-/** Count without dragging whole collections over the wire, when possible. */
-async function safeCount(
-  collection: Awaited<ReturnType<typeof getProspectsCollection>>,
-  filter: Record<string, unknown> = {}
-): Promise<number> {
+/**
+ * Cheap counters.
+ *
+ * The dashboard used to read whole collections (`find({})`) just to count
+ * them â€” with a few thousand prospects and outreach records (each outreach doc
+ * carries the rendered email body) that was 30+ seconds per render. The Data
+ * API can count server-side, capped at 1000 documents per call, so anything
+ * bigger reports "1000+" instead of pulling every row across the wire.
+ */
+interface Counted {
+  count: number;
+  /** True when the collection holds more than the API can count in one call. */
+  capped: boolean;
+}
+
+type AnyCollection = Awaited<ReturnType<typeof getProspectsCollection>>;
+
+const COUNT_CAP = 1000;
+
+async function countWhere(collection: AnyCollection, filter: Record<string, unknown>): Promise<Counted> {
   try {
     const counter = (collection as unknown as {
       countDocuments?: (f: Record<string, unknown>, upperBound?: number) => Promise<number>;
     }).countDocuments;
     if (typeof counter === "function") {
-      return await counter.call(collection, filter, 100_000);
+      return { count: await counter.call(collection, filter, COUNT_CAP), capped: false };
     }
-    return (await collection.find(filter).toArray()).length;
+    return { count: (await collection.find(filter).toArray()).length, capped: false };
   } catch {
-    return 0;
+    // More documents than one count call can see â€” "1000+" is the honest answer.
+    return { count: COUNT_CAP, capped: true };
   }
 }
 
-async function loadProspects(): Promise<Prospect[]> {
+/** Exact size without reading documents (the Data API's estimate is exact). */
+async function estimateCount(collection: AnyCollection): Promise<number> {
   try {
-    return (await (await getProspectsCollection()).find({}).toArray()) as unknown as Prospect[];
+    const estimator = (collection as unknown as {
+      estimatedDocumentCount?: () => Promise<number>;
+    }).estimatedDocumentCount;
+    if (typeof estimator === "function") return await estimator.call(collection);
   } catch {
-    return [];
+    // fall through to the capped count
   }
+  return (await countWhere(collection, {})).count;
 }
 
 async function loadRecentJobs(): Promise<AuditJob[]> {
@@ -108,11 +130,36 @@ async function loadRecentNotifications(): Promise<AppNotification[]> {
   }
 }
 
-export default async function DashboardPage() {
-  const settings = await automationSettingsService.getSettingsOrDefaults();
+interface DashboardOverview {
+  settings: Awaited<ReturnType<typeof automationSettingsService.getSettingsOrDefaults>>;
+  statusCounts: Counted[];
+  totalProspects: number;
+  highOpportunity: Counted;
+  topProspects: Prospect[];
+  recentJobs: AuditJob[];
+  notifications: AppNotification[];
+  auditsStored: number;
+  emailsSentAllTime: Counted;
+  queuedJobs: number;
+  runningJobs: number;
+  sentToday: number;
+  capacities: Awaited<ReturnType<typeof emailQuotaService.getCapacities>> | null;
+}
+
+async function loadOverview(): Promise<DashboardOverview> {
+  const [prospectsCol, jobsCol, auditsCol, outreachCol] = await Promise.all([
+    getProspectsCollection(),
+    getAuditJobsCollection(),
+    getAuditsCollection(),
+    getOutreachCollection(),
+  ]);
 
   const [
-    prospects,
+    settings,
+    statusCounts,
+    totalProspects,
+    highOpportunity,
+    topDocs,
     recentJobs,
     notifications,
     auditsStored,
@@ -122,60 +169,79 @@ export default async function DashboardPage() {
     sentToday,
     capacities,
   ] = await Promise.all([
-    loadProspects(),
+    automationSettingsService.getSettingsOrDefaults(),
+    Promise.all(STATUS_ORDER.map((status) => countWhere(prospectsCol, { pipelineStatus: status }))),
+    estimateCount(prospectsCol),
+    countWhere(prospectsCol, {
+      $or: [{ priorityLevel: { $in: ["HOT", "HIGH"] } }, { priorityScore: { $gte: 55 } }],
+    }),
+    (async (): Promise<Prospect[]> => {
+      try {
+        return (await prospectsCol
+          .find({}, { sort: { priorityScore: -1 }, limit: 8 })
+          .toArray()) as unknown as Prospect[];
+      } catch {
+        return [];
+      }
+    })(),
     loadRecentJobs(),
     loadRecentNotifications(),
-    (async () => {
-      try {
-        return await safeCount((await getAuditsCollection()) as never);
-      } catch {
-        return 0;
-      }
-    })(),
-    (async () => {
-      try {
-        const collection = (await getOutreachCollection()) as never;
-        return await safeCount(collection, { status: "SENT" });
-      } catch {
-        return 0;
-      }
-    })(),
-    (async () => {
-      try {
-        return await safeCount((await getAuditJobsCollection()) as never, { status: "QUEUED" });
-      } catch {
-        return 0;
-      }
-    })(),
-    (async () => {
-      try {
-        return await safeCount((await getAuditJobsCollection()) as never, { status: "RUNNING" });
-      } catch {
-        return 0;
-      }
-    })(),
+    estimateCount(auditsCol),
+    countWhere(outreachCol, { status: "SENT" }),
+    countWhere(jobsCol, { status: "QUEUED" }),
+    countWhere(jobsCol, { status: "RUNNING" }),
     outreachPersistenceService.countSentSince(startOfUtcDayIso()).catch(() => 0),
     emailQuotaService.getCapacities().catch(() => null),
   ]);
 
-  const highOpportunity = prospects.filter(
-    (p) =>
-      p.priorityLevel === "HOT" ||
-      p.priorityLevel === "HIGH" ||
-      (p.priorityScore ?? 0) >= 55
-  ).length;
+  return {
+    settings,
+    statusCounts,
+    totalProspects,
+    highOpportunity: highOpportunity,
+    topProspects: topDocs,
+    recentJobs,
+    notifications,
+    auditsStored,
+    emailsSentAllTime,
+    queuedJobs: queuedJobs.count,
+    runningJobs: runningJobs.count,
+    sentToday,
+    capacities,
+  };
+}
 
-  const funnel = STATUS_ORDER.map((status) => ({
+export default async function DashboardPage() {
+  // Several navigation clicks in a row should not re-run the same queries: a
+  // 15-second window is short enough that the console still feels live.
+  const {
+    settings,
+    statusCounts,
+    totalProspects,
+    highOpportunity,
+    topProspects,
+    recentJobs,
+    notifications,
+    auditsStored,
+    emailsSentAllTime,
+    queuedJobs,
+    runningJobs,
+    sentToday,
+    capacities,
+  } = await cachedFor("dashboard:overview", 15_000, loadOverview);
+
+  const emailsSentLabel = emailsSentAllTime.capped
+    ? `${COUNT_CAP}+`
+    : String(emailsSentAllTime.count);
+
+  const funnel = STATUS_ORDER.map((status, index) => ({
     status,
     label: STATUS_LABELS[status] ?? status,
-    count: prospects.filter((p) => p.pipelineStatus === status).length,
+    count: statusCounts[index]?.count ?? 0,
+    capped: statusCounts[index]?.capped ?? false,
   })).filter((row) => row.count > 0);
 
   const funnelMax = Math.max(1, ...funnel.map((row) => row.count));
-
-  const topProspects = [...prospects]
-    .sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0))
-    .slice(0, 8);
 
   const capReached = sentToday >= settings.dailyCap;
   const busy = queuedJobs + runningJobs > 0 || recentJobs.some((job) => job.status === "RUNNING");
@@ -217,16 +283,16 @@ export default async function DashboardPage() {
 
       {/* TELEMETRY */}
       <div className="flex flex-wrap items-stretch gap-px border border-[#1b2530] bg-[#0c1116]">
-        <TelemetryCell label="pipeline" value={`${prospects.length} tracked`} led tone="green" />
-        <TelemetryCell label="high opportunity" value={`${highOpportunity} hot / high`} tone={highOpportunity > 0 ? "amber" : "dim"} />
+        <TelemetryCell label="pipeline" value={`${totalProspects} tracked`} led tone="green" />
+        <TelemetryCell label="high opportunity" value={`${highOpportunity.capped ? `${COUNT_CAP}+` : highOpportunity.count} hot / high`} tone={highOpportunity.count > 0 ? "amber" : "dim"} />
         <TelemetryCell label="audit store" value={`${auditsStored} audits`} />
-        <TelemetryCell label="emails sent" value={`${emailsSentAllTime} all-time`} tone="green" />
+        <TelemetryCell label="emails sent" value={`${emailsSentLabel} all-time`} tone="green" />
         <TelemetryCell
           label="left today"
           value={capacities ? `${totalRemaining(capacities)} / ${settings.dailyCap}` : "unknown"}
           tone={capReached ? "red" : "green"}
         />
-        <TelemetryCell label="queue" value={`${queuedJobs} ▸ ${runningJobs} live`} tone={busy ? "amber" : "dim"} led />
+        <TelemetryCell label="queue" value={`${queuedJobs} â–¸ ${runningJobs} live`} tone={busy ? "amber" : "dim"} led />
         <TelemetryCell
           label="auto-send"
           value={
@@ -257,7 +323,7 @@ export default async function DashboardPage() {
             tone={capReached ? "red" : "green"}
             footer={
               capReached
-                ? `empty · refills ${nextUtcResetLabel(settings.timezone)} local (00:00 UTC) — audits keep running`
+                ? `empty Â· refills ${nextUtcResetLabel(settings.timezone)} local (00:00 UTC) â€” audits keep running`
                 : `refills ${nextUtcResetLabel(settings.timezone)} local (00:00 UTC)`
             }
           />
@@ -275,22 +341,22 @@ export default async function DashboardPage() {
             max={Math.max(100, auditsStored)}
             unit="records"
             tone="amber"
-            footer={`${prospects.length} prospects built from them`}
+            footer={`${totalProspects} prospects built from them`}
           />
           <Cylinders
             busy={busy}
-            note={busy ? livePhase : "standing by — load screenshots into the intake bays"}
+            note={busy ? livePhase : "standing by â€” load screenshots into the intake bays"}
           />
         </div>
       </ConsolePanel>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* FUNNEL */}
-        <ConsolePanel title="pipeline funnel" right={<span className="mc-label">{prospects.length} prospects</span>}>
+        <ConsolePanel title="pipeline funnel" right={<span className="mc-label">{totalProspects} prospects</span>}>
           <div className="px-4 py-3">
             {funnel.length === 0 ? (
               <p className="py-4 text-[11px] text-[#4b5a68]">
-                pipeline is empty — discover businesses or load screenshots to fill it.
+                pipeline is empty â€” discover businesses or load screenshots to fill it.
               </p>
             ) : (
               funnel.map((row) => (
@@ -300,7 +366,7 @@ export default async function DashboardPage() {
                   value={row.count}
                   max={funnelMax}
                   tone={row.status === "NEW" ? "amber" : "dim"}
-                  right={`${row.count}`}
+                  right={`${row.count}${row.capped ? "+" : ""}`}
                 />
               ))
             )}
@@ -312,7 +378,7 @@ export default async function DashboardPage() {
           title="top opportunities"
           right={
             <Link href="/dashboard/pipeline" className="mc-label hover:text-[#f5a524]">
-              open pipeline →
+              open pipeline â†’
             </Link>
           }
         >
@@ -348,7 +414,7 @@ export default async function DashboardPage() {
           title="operations log"
           right={
             <Link href="/dashboard/screenshot" className="mc-label hover:text-[#f5a524]">
-              full console →
+              full console â†’
             </Link>
           }
         >
@@ -368,9 +434,9 @@ export default async function DashboardPage() {
                       <span className={job.status === "RUNNING" ? "text-[#f5a524]" : "text-[#c8d3dd]"}>{job.businessName}</span>
                       {job.stage === "REPORT" && <span className="text-[#4b5a68]"> // AI REPORT</span>}
                       {job.status === "RUNNING" && job.phase && (
-                        <span className="text-[#f5a524]"> ▸ {job.phase}</span>
+                        <span className="text-[#f5a524]"> â–¸ {job.phase}</span>
                       )}
-                      {job.note && <span className="block text-[#2fd583]">✓ {job.note}</span>}
+                      {job.note && <span className="block text-[#2fd583]">âœ“ {job.note}</span>}
                       {job.lastError && <span className="block text-[#ff9a93]">! {job.lastError}</span>}
                     </span>
                   </li>
@@ -385,7 +451,7 @@ export default async function DashboardPage() {
           title="recent activity"
           right={
             <Link href="/dashboard/notifications" className="mc-label hover:text-[#f5a524]">
-              all events →
+              all events â†’
             </Link>
           }
         >

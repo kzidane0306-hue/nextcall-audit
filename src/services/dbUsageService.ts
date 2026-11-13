@@ -32,7 +32,7 @@ const COLLECTIONS = [
 const SAMPLE_SIZE = 20;
 
 /** The settings page is not a live dashboard; a few minutes of cache is fine. */
-const CACHE_TTL_MS = 5 * 60_000;
+const CACHE_TTL_MS = 30 * 60_000;
 
 /** Give up (and hide the panel) rather than stall the page render. */
 const TIMEOUT_MS = 6_000;
@@ -59,6 +59,7 @@ interface MinimalCollection {
     toArray: () => Promise<Record<string, unknown>[]>;
   };
   countDocuments?: (filter: Record<string, unknown>, upperBound: number) => Promise<number>;
+  estimatedDocumentCount?: () => Promise<number>;
 }
 
 export class DbUsageService {
@@ -150,33 +151,38 @@ export class DbUsageService {
   }
 }
 
-/**
- * Prefers the server-side count; falls back to reading the collection when the
- * driver (or the in-memory shim) does not implement it.
- *
- * The Data API refuses to count more than 1000 documents in one call (it
- * throws TooManyDocumentsToCountError), so a bigger collection is counted by
- * reading it — rare enough to be worth the one-off cost, and the result is
- * cached for a few minutes.
- */
+/** The Data API's hard ceiling for one count call. */
 const COUNT_UPPER_BOUND = 1000;
 
+/**
+ * Document count without reading the documents.
+ *
+ * `estimatedDocumentCount` is exact on the Data API and works past the count
+ * call's 1000-document ceiling; the capped `countDocuments` is the fallback.
+ * The settings page must never scan a whole collection — that is what used to
+ * make it take 30 seconds once the tables grew past a thousand rows.
+ */
 async function countDocuments(collection: MinimalCollection, sampleLength: number): Promise<number> {
+  if (typeof collection.estimatedDocumentCount === "function") {
+    try {
+      const count = await collection.estimatedDocumentCount();
+      if (typeof count === "number" && Number.isFinite(count)) return count;
+    } catch {
+      // Unsupported by this driver/database — try the capped count.
+    }
+  }
+
   if (typeof collection.countDocuments === "function") {
     try {
       const count = await collection.countDocuments({}, COUNT_UPPER_BOUND);
       if (typeof count === "number" && Number.isFinite(count)) return count;
     } catch {
-      // More than COUNT_UPPER_BOUND documents (or unsupported) — scan below.
+      // More than COUNT_UPPER_BOUND documents (or unsupported).
     }
   }
 
-  try {
-    const all = await collection.find({}).toArray();
-    return all.length;
-  } catch {
-    return sampleLength;
-  }
+  // Unknown but clearly non-empty: report the sample size instead of scanning.
+  return sampleLength;
 }
 
 export const dbUsageService = new DbUsageService();

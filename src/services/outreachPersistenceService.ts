@@ -377,12 +377,29 @@ async markAsSent(
    * Backs the auto-send daily cap, so a burst can never burn the sending
    * domain's reputation (Resend free tier allows 100 emails/day).
    */
-  async countSentSince(sinceIso: string): Promise<number> {
+  /**
+   * Counts SENT outreach emails matching extra filters.
+   *
+   * Counting happens in the database — the old version downloaded every SENT
+   * record just to walk it, and each of those records carries the full
+   * rendered HTML body. That single scan was the settings/dashboard page's
+   * biggest cost (30+ seconds on a few thousand sends). The Data API counts at
+   * most 1000 documents per call, which is far above a day's sending cap.
+   */
+  private async countSentMatching(filter: Record<string, unknown>): Promise<number> {
     try {
       const collection = await getOutreachCollection();
-      const cursor = collection.find({ status: "SENT" });
-      const docs = (await cursor.toArray()) as unknown as OutreachRecord[];
-      return docs.filter((d) => d.sentAt && d.sentAt >= sinceIso).length;
+      const counter = (collection as unknown as {
+        countDocuments?: (f: Record<string, unknown>, upperBound: number) => Promise<number>;
+      }).countDocuments;
+      const fullFilter = { status: "SENT", ...filter };
+
+      if (typeof counter === "function") {
+        return await counter.call(collection, fullFilter, 1000);
+      }
+
+      const docs = (await collection.find(fullFilter).toArray()) as unknown as OutreachRecord[];
+      return docs.length;
     } catch (error) {
       logger.error(
         "[OutreachPersistenceService] Failed to count sends:",
@@ -392,69 +409,54 @@ async markAsSent(
     }
   }
 
+  async countSentSince(sinceIso: string): Promise<number> {
+    return this.countSentMatching({ sentAt: { $gte: sinceIso } });
+  }
+
   /**
    * Sends since `sinceIso` per provider.
    *
    * This is the day's spend for the Mailgun-first routing: Mailgun is offered
    * while it has room, Mailtop takes the next stretch and Resend only the
    * overflow. Records written before the current provider set have no
-   * `provider` field — those were all sent through Resend, so they are
-   * counted there. Records from the retired Brevo era are ignored: Brevo is
-   * gone and its sends must not consume today's Mailgun/Mailtop/Resend quota.
+   * `provider` field — those were all sent through Resend, so they fall into
+   * the remainder. Records from the retired Brevo era are older than today and
+   * therefore never part of this count.
    */
   async countSentSinceByProvider(
     sinceIso: string
   ): Promise<Record<EmailProviderName, number>> {
-    const counts: Record<EmailProviderName, number> = { mailgun: 0, mailtop: 0, resend: 0 };
+    const since = { sentAt: { $gte: sinceIso } };
 
-    try {
-      const collection = await getOutreachCollection();
-      const cursor = collection.find({ status: "SENT" });
-      const docs = (await cursor.toArray()) as unknown as OutreachRecord[];
+    const [total, mailgun, mailtop] = await Promise.all([
+      this.countSentMatching(since),
+      this.countSentMatching({ ...since, provider: "mailgun" }),
+      this.countSentMatching({ ...since, provider: "mailtop" }),
+    ]);
 
-      for (const doc of docs) {
-        if (!doc.sentAt || doc.sentAt < sinceIso) continue;
-        const provider = doc.provider as EmailProviderName | "brevo" | null | undefined;
-
-        if (provider === "brevo") continue;
-        const counted: EmailProviderName =
-          provider === "mailgun" || provider === "mailtop" || provider === "resend"
-            ? provider
-            : "resend";
-        counts[counted] += 1;
-      }
-
-      return counts;
-    } catch (error) {
-      logger.error(
-        "[OutreachPersistenceService] Failed to count sends per provider:",
-        getErrorMessage(error)
-      );
-      return counts;
-    }
+    return {
+      mailgun,
+      mailtop,
+      resend: Math.max(0, total - mailgun - mailtop),
+    };
   }
 
   /**
    * Sends since `sinceIso`, split into initial audit emails and follow-ups.
    * The daily cap counts both, so the dashboard shows both.
-   */  async countSentSinceByStage(
+   */
+  async countSentSinceByStage(
     sinceIso: string
   ): Promise<{ total: number; initial: number; followUps: number }> {
-    try {
-      const collection = await getOutreachCollection();
-      const cursor = collection.find({ status: "SENT" });
-      const docs = (await cursor.toArray()) as unknown as OutreachRecord[];
-      const today = docs.filter((d) => d.sentAt && d.sentAt >= sinceIso);
+    const since = { sentAt: { $gte: sinceIso } };
+
+    const [total, initial] = await Promise.all([
+      this.countSentMatching(since),
       // OutreachStage is numeric: 0 = initial audit email, 1+ = follow-ups.
-      const initial = today.filter((d) => d.sequenceStage === 0).length;
-      return { total: today.length, initial, followUps: today.length - initial };
-    } catch (error) {
-      logger.error(
-        "[OutreachPersistenceService] Failed to count sends by stage:",
-        getErrorMessage(error)
-      );
-      return { total: 0, initial: 0, followUps: 0 };
-    }
+      this.countSentMatching({ ...since, sequenceStage: 0 }),
+    ]);
+
+    return { total, initial, followUps: Math.max(0, total - initial) };
   }
 
   /**
