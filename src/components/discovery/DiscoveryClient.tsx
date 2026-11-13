@@ -28,24 +28,142 @@ type BusinessWithAudit = Business & {
     aiReport?: AuditReport;
 };
 
-const NICHE_OPTIONS = [
-    "Plumbing",
-    "Electrical",
-    "HVAC",
-    "Roofing",
-    "Landscaping",
-    "Cleaning",
-    "Painting",
-    "General Contractor",
-    "Auto Repair",
-    "Legal Services",
-    "Real Estate",
-    "Healthcare",
-    "Salon & Spa",
-    "Restaurant",
-    "Retail",
-    "Other...",
-] as const;
+/**
+ * Niches grouped by how much a missed call costs the business.
+ *
+ * Order matters: the home-service trades on top are the ones where an AI
+ * receptionist pays for itself fastest (one missed emergency call is often a
+ * four-figure job), so they are the easiest sells and the best discovery runs.
+ * The search value stays the plain label — the grouping is presentation only.
+ */
+const NICHE_GROUPS: Array<{ label: string; options: string[] }> = [
+    {
+        label: "Home services — highest missed-call value",
+        options: [
+            "Plumbing",
+            "HVAC",
+            "Electrical",
+            "Roofing",
+            "Locksmith",
+            "Garage Door",
+            "Appliance Repair",
+            "Pest Control",
+            "Water Damage Restoration",
+            "Septic Tank",
+            "Handyman",
+            "General Contractor",
+            "Landscaping",
+            "Lawn Care",
+            "Tree Service",
+            "Fencing",
+            "Concrete & Masonry",
+            "Painting",
+            "Flooring",
+            "Carpet Cleaning",
+            "Cleaning Services",
+            "Window Cleaning",
+            "Pressure Washing",
+            "Pool Service",
+            "Solar Installation",
+            "Moving Company",
+        ],
+    },
+    {
+        label: "Auto & transport",
+        options: [
+            "Auto Repair",
+            "Auto Body & Collision",
+            "Auto Detailing",
+            "Auto Glass",
+            "Tire Shop",
+            "Towing",
+            "Car Wash",
+            "Motorcycle Repair",
+            "RV Repair",
+        ],
+    },
+    {
+        label: "Health & medical",
+        options: [
+            "Dental",
+            "Chiropractic",
+            "Physical Therapy",
+            "Med Spa",
+            "Dermatology",
+            "Optometry",
+            "Veterinary",
+            "Home Care",
+            "Urgent Care",
+            "Mental Health",
+            "Acupuncture",
+            "Healthcare",
+        ],
+    },
+    {
+        label: "Beauty & wellness",
+        options: [
+            "Salon & Spa",
+            "Barbershop",
+            "Nail Salon",
+            "Massage Therapy",
+            "Tattoo Studio",
+            "Waxing & Laser",
+            "Pet Grooming",
+        ],
+    },
+    {
+        label: "Food & hospitality",
+        options: [
+            "Restaurant",
+            "Cafe & Coffee Shop",
+            "Bakery",
+            "Catering",
+            "Food Truck",
+            "Bar & Lounge",
+            "Hotel & B&B",
+        ],
+    },
+    {
+        label: "Professional services",
+        options: [
+            "Legal Services",
+            "Accounting & Tax",
+            "Insurance",
+            "Mortgage & Loans",
+            "Financial Advisor",
+            "Real Estate",
+            "Property Management",
+            "IT Services",
+            "Marketing Agency",
+            "Event Planning",
+            "Photography",
+            "Printing & Signage",
+        ],
+    },
+    {
+        label: "Fitness & education",
+        options: [
+            "Gym & Fitness Studio",
+            "Yoga & Pilates",
+            "Martial Arts",
+            "Personal Training",
+            "Dance Studio",
+            "Daycare & Preschool",
+            "Tutoring",
+            "Driving School",
+        ],
+    },
+    {
+        label: "Retail & other",
+        options: [
+            "Retail",
+            "E-commerce",
+            "Florist",
+            "Jewelry Store",
+            "Furniture Store",
+        ],
+    },
+];
 
 const RADIUS_OPTIONS = [
     { label: "1 mile", value: 1609 },
@@ -338,9 +456,14 @@ export default function DiscoveryClient() {
                         className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                         <option value="" disabled>Select business type</option>
-                        {NICHE_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
+                        {NICHE_GROUPS.map((group) => (
+                            <optgroup key={group.label} label={group.label}>
+                                {group.options.map((opt) => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </optgroup>
                         ))}
+                        <option value="Other...">Other...</option>
                     </select>
                     {selectedNiche === "Other..." && (
                         <Input
