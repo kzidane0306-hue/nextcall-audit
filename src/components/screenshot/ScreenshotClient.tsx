@@ -869,7 +869,7 @@ export default function ScreenshotClient() {
             <Button
               onClick={handleQueue}
               disabled={submitting || !googleReady}
-              className="gap-2 rounded-lg bg-indigo-600 px-4 font-mono text-[11px] uppercase tracking-[0.16em] text-white shadow-sm transition-colors hover:bg-indigo-700"
+              className="gap-2 rounded-lg nc-gradient-primary px-4 font-mono text-[11px] uppercase tracking-[0.16em] text-white shadow-sm transition-all hover:brightness-110"
             >
               {submitting ? (
                 <>

@@ -41,7 +41,7 @@ export function ConsoleHeader({
     <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e7ec] pb-3">
       <div>
         <p className="mc-label">{eyebrow}</p>
-        <h1 className="mt-1 text-base font-semibold tracking-[0.08em] text-[#1a2230]">{title}</h1>
+        <h1 className="nc-gradient-text mt-1 text-lg font-bold tracking-[0.08em]">{title}</h1>
         {meta && <p className="mt-1 text-[11px] text-[#8b95a3]">{meta}</p>}
       </div>
       {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
@@ -85,11 +85,11 @@ export function TelemetryCell({
   led?: boolean;
 }) {
   return (
-    <div className="flex min-w-[130px] flex-1 items-center gap-2 px-3 py-2">
+    <div className="flex min-w-[130px] flex-1 items-center gap-2 px-3 py-2 transition-colors hover:bg-indigo-50/50">
       {led && <span className={`mc-led ${TONE_LED[tone]}`} />}
       <div className="flex min-w-0 flex-col">
         <span className="mc-label">{label}</span>
-        <span className={`truncate text-[11.5px] ${TONE_TEXT[tone]}`}>{value}</span>
+        <span className={`truncate text-[11.5px] font-semibold ${TONE_TEXT[tone]}`}>{value}</span>
       </div>
     </div>
   );
@@ -218,10 +218,10 @@ export function BarRow({
     <div className="flex flex-col gap-1 py-2">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em]">
         <span className="text-[#66707d]">{label}</span>
-        <span className="text-[#1a2230]">{right ?? value}</span>
+        <span className="font-semibold text-[#1a2230]">{right ?? value}</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden bg-[#f1f3f6]">
-        <div className="h-full" style={{ width: `${percent}%`, backgroundColor: bar }} />
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#f1f3f6]">
+        <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${percent}%`, backgroundColor: bar }} />
       </div>
     </div>
   );

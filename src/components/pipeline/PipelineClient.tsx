@@ -12,7 +12,7 @@ import {
     setLastActiveFilter,
 } from "./pipelineCache";
 import { Card, CardContent } from "@/components/ui/card";
-import { Trash2 } from "lucide-react";
+import { Trash2, Inbox } from "lucide-react";
 import { FacebookIcon } from "@/components/ui/facebook-icon";
 import { logger } from "@/lib/logger";
 import { hasBeenEmailed, isProspectUnread } from "@/lib/pipelineReadState";
@@ -214,8 +214,8 @@ export default function PipelineClient() {
                                 onClick={() => applyFilter(view.id)}
                                 className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-all ${
                                     isActive
-                                        ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
-                                        : "border-border bg-white text-muted-foreground hover:border-indigo-300 hover:text-foreground"
+                                        ? "nc-gradient-primary border-transparent text-white shadow-md"
+                                        : "border-border bg-white text-muted-foreground hover:border-indigo-300 hover:text-foreground hover:shadow-sm"
                                 }`}
                             >
                                 {view.label}
@@ -241,7 +241,11 @@ export default function PipelineClient() {
 
                 {!isLoading && displayedProspects.length === 0 && (
                     <Card>
-                        <CardContent className="p-8 text-center text-gray-500">
+                        <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-indigo-50 text-indigo-500">
+                                <Inbox className="h-5 w-5" />
+                            </span>
+                            <p className="max-w-md text-sm text-muted-foreground">
                             {activeFilter === "DUE"
                                 ? "Nothing is due right now — every audit has been emailed and no follow-up has come round."
                                 : activeFilter === "FACEBOOK"
@@ -255,6 +259,7 @@ export default function PipelineClient() {
                                 : activeFilter === "EMAILED"
                                 ? "No emails sent yet. Open a prospect and send the initial outreach email."
                                 : "No prospects found. Discover businesses or load screenshots to fill the pipeline."}
+                            </p>
                         </CardContent>
                     </Card>
                 )}
@@ -269,12 +274,12 @@ export default function PipelineClient() {
                     const fbSent = p.facebookStatus === "SENT";
 
                     return (
-                        <Link href={`/dashboard/pipeline/${p.id}`} key={p.id} className="block">
-                            <Card className={`mb-3 cursor-pointer rounded-xl transition-all hover:-translate-y-px hover:shadow-md ${isUnread ? 'border-l-4 border-l-blue-500 bg-blue-50/30' : ''}`}>
+                        <Link href={`/dashboard/pipeline/${p.id}`} key={p.id} className="group block">
+                            <Card className={`mb-3 cursor-pointer rounded-xl transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg ${isUnread ? 'border-l-4 border-l-blue-500 bg-blue-50/30' : ''}`}>
                             <CardContent className="flex items-center justify-between gap-3 p-4">
                                 <div className="flex min-w-0 flex-col">
                                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                        <span className={`font-medium ${isUnread ? 'text-slate-900 font-bold' : 'text-slate-700'}`}>
+                                        <span className={`font-medium transition-colors group-hover:text-indigo-700 ${isUnread ? 'text-slate-900 font-bold' : 'text-slate-700'}`}>
                                             {isUnread && <span className="text-blue-500 mr-1">●</span>}
                                             {p.businessName}
                                         </span>

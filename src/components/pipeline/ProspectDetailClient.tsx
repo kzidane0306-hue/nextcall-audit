@@ -505,7 +505,8 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
             <div className="flex flex-wrap justify-between items-start gap-4 border-b pb-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">{business.name || "Unknown Business"}</h1>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <div className="mt-2 h-1 w-20 rounded-full bg-gradient-to-r from-indigo-500 to-sky-400" />
+                    <p className="text-sm text-gray-500 mt-2">
                         {(business.categories?.[0] || snapshot?.categories?.[0]) || "General"} | {business.location?.city || snapshot?.location?.city || "—"}, {business.location?.state || snapshot?.location?.state || ""}
                     </p>
                     {isBusinessMissing && (
@@ -581,6 +582,7 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
                                                 href={browserFbUrl ?? "#"}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
+                                                onClick={() => { if (!fbSent) void handleMarkFbSent(true); }}
                                                 className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-[#1877f2] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#166fe0]"
                                             >
                                                 <FacebookIcon className="h-4 w-4" />
@@ -631,6 +633,7 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
                                                     href={messengerFbUrl}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
+                                                    onClick={() => { if (!fbSent) void handleMarkFbSent(true); }}
                                                     className="text-muted-foreground transition-colors hover:text-foreground hover:underline"
                                                 >
                                                     Messenger (m.me)
@@ -678,7 +681,7 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
                             <CardHeader><CardTitle className="text-sm">Digital Presence Audit</CardTitle></CardHeader>
                             <CardContent>
                                 <div className="flex justify-between items-center mb-4">
-                                    <span className="text-4xl font-bold text-blue-600">{audit.overallScore}<span className="text-lg text-gray-400">/100</span></span>
+                                    <span className="nc-gradient-text text-4xl font-bold">{audit.overallScore}<span className="text-lg text-gray-400">/100</span></span>
                                     <div className="flex flex-col items-end gap-1">
                                         <span className="text-xs px-2 py-1 bg-gray-100 rounded-full">{audit.confidence} Confidence</span>
                                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${prospect.isSuppressed ? 'bg-red-100 text-red-800' : 'bg-purple-100 text-purple-800'}`}>
@@ -809,7 +812,7 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
                             <CardContent>
                                 <div className="flex justify-between items-center mb-4">
                                     <div className="flex flex-col">
-                                        <span className="text-4xl font-bold text-blue-600">
+                                        <span className="nc-gradient-text text-4xl font-bold">
                                             {prospect.priorityScore || 0}<span className="text-lg text-gray-400">/100</span>
                                         </span>
                                         <span className="text-xs text-gray-500 uppercase tracking-wide">Overall Priority</span>

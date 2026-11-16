@@ -64,12 +64,26 @@ export function setLastActiveFilter(filter: PipelineFilter): void {
  * Merge a freshly fetched prospect into every cached list and re-sort each
  * one with the canonical pipeline order. The detail page calls this with the
  * prospect it just received from the API.
+ *
+ * Special case: the FACEBOOK box is a work queue — once the prospect's
+ * Facebook message is marked sent (or its URL is removed), the row must
+ * LEAVE the box immediately, not wait for the next background revalidation.
  */
 export function patchCachedProspect(updated: Prospect): void {
   if (!updated?.id) return;
 
   for (const [filter, list] of cache) {
     if (!list.some((p) => p.id === updated.id)) continue;
+
+    // The Facebook box only holds READY rows — a SENT (or unlinked) prospect
+    // is dropped from that cached list on the spot.
+    if (filter === "FACEBOOK" && updated.facebookStatus !== "READY") {
+      cache.set(
+        filter,
+        list.filter((p) => p.id !== updated.id)
+      );
+      continue;
+    }
 
     const next = list
       .map((p) =>
