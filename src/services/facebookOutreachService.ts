@@ -1,136 +1,114 @@
 import "server-only";
 
 import { z } from "zod";
-import { Business, StoredAudit, AuditReport } from "@/types";
+import { Business } from "@/types";
 import { generateLLMResponse } from "@/lib/ai";
 import { AI_CHAINS } from "@/lib/ai/chains";
 import { prospectPersistenceService } from "@/services/prospectPersistenceService";
-import { auditPersistenceService } from "@/services/auditPersistenceService";
 import { persistenceService } from "@/services/persistenceService";
 import { logger } from "@/lib/logger";
 
 /**
- * The short Facebook opener.
+ * The short Facebook opener — a COLD first impression.
  *
- * Every new prospect that carries a Facebook page URL (read off the About
- * screenshot's address bar) gets ONE small, personalized message the operator
- * can copy in a single click and paste into the page's chat. This is a DM
- * from a human, not the audit email: two to four sentences, warm, specific,
- * and ending with one easy question.
+ * The operator has never spoken to this business. The message must read like
+ * a polite stranger offering something useful, NOT like a follow-up from
+ * someone they already know. So the shape is fixed:
  *
- * Generated once during the REPORT stage (best-effort — a failure never fails
- * the job) and on demand from the prospect page's "Generate message" button.
+ *   Hey {business}! 👋
+ *
+ *   I came across your business while researching local {category} companies.
+ *   I noticed a few things that might be worth a quick look.
+ *
+ *   I put together a quick audit for {business} — would you be open to seeing it?
+ *
+ * No NextCall pitch, no audit findings, no "your business doesn't have X" —
+ * all of that comes later, in the audit email, AFTER they say yes. The AI
+ * only softens the phrasing inside the skeleton; anything that breaks the
+ * skeleton (a NextCall pitch, a gap claim, familiarity) is rejected and the
+ * deterministic template below ships instead — the button never dead-ends.
  */
 
 const MessageSchema = z.object({
-  message: z.string().min(20).max(700),
+  message: z.string().min(30).max(400),
 });
 
 const SYSTEM_PROMPT = `
-You write ONE short Facebook page message (a direct message) for NextCall, an AI voice receptionist for local service businesses.
+You write ONE very short first-contact Facebook message for a human consultant to send to a local business's page. This is a COLD first impression: the owner does NOT know the sender and has never been contacted. A stranger is politely offering something useful.
 
-WHO IS WRITING
-A real human consultant (the NextCall user) messaging the business's Facebook page from their own account, speaking in the first person ("I"). The message is pasted straight into Messenger, so it must read like a person typing, not like marketing copy.
+SHAPE — exactly 3 short lines separated by blank lines:
+Line 1: "Hey {business name}! 👋"
+Line 2: ONE flowing sentence or two tiny ones: you came across the business while researching local {category} companies (mention the city if provided), and you noticed a few things that might be worth a quick look. Never say WHAT the things are.
+Line 3: "I put together a quick audit for {business name} — would you be open to seeing it?"
 
-THE ONE GOAL
-Make the business owner curious enough to reply. A message that could have been sent to any business gets ignored; one that is clearly about THEIR business gets answers.
-
-SHAPE (STRICT)
-- 2 to 4 sentences, at most 55 words. Plain text only.
-- No greeting like "Dear Sir/Madam", no subject line, no signature, no links, no hashtags, no emojis, no bullet points.
-- Open with ONE concrete detail that is only true for this business: their rating or review count, their category and city, a service they list, being open around the clock, or a specific audit observation.
-- Mention NextCall in ONE sentence, naturally: an AI receptionist that answers calls 24/7 and can help with booking. Tie it to a gap the audit actually noticed, with evidence-aware wording: "I noticed", "I didn't see", "no publicly detectable". NEVER claim they are losing calls, customers or money, and never invent facts.
-- Close with ONE low-friction question (for example: whether they'd like the full audit, or whether missed after-hours calls are ever a concern — only if the data supports it).
-
-ABSOLUTE RULES
-- Use ONLY facts provided in the input. Never invent ratings, tools, services, hours or outcomes.
-- Address the business as "your" ("your team", "your customers") — never by name, since the message is sent TO them and their name is already in front of them.
-- The tone is warm, respectful, confident, brief.
+HARD RULES
+- At most 45 words total. Casual, human, plain text.
+- NEVER imply prior contact or familiarity ("your impressive rating", "as you know", "following up").
+- NEVER state audit findings or gaps: no missing booking, no missed calls, no lost customers, no "you don't have X". "A few things worth a quick look" is as far as it goes.
+- NEVER mention NextCall, an AI receptionist, or 24/7 answering. The first message offers the audit only — the details come later, after they reply.
+- The ONLY emoji allowed is the single 👋 in line 1. No links, no hashtags, no signature.
+- Use ONLY the provided business facts (name, category, city). Never invent anything.
+- The business name appears only in lines 1 and 3, spelled exactly as given.
 
 Return ONLY valid JSON: { "message": "..." }
 `;
 
-function buildUserPrompt(
-  business: Business,
-  audit: StoredAudit["audit"] | null,
-  aiReport: AuditReport | null
-): string {
-  const location =
-    [business.location?.city, business.location?.state].filter(Boolean).join(", ") || "Unknown";
-  const category = business.categories?.filter(Boolean).join(", ") || "Unknown";
-  const rating =
-    business.rating != null
-      ? `${business.rating}/5${business.reviewCount ? ` across ${business.reviewCount} reviews` : ""}`
-      : "Unknown";
-  const websiteUrl = business.enrichment?.website?.url || business.website || null;
-
-  const booking = business.enrichment?.booking;
-  const bookingLine = !booking
-    ? "Not verified"
-    : booking.detected
-      ? `Detected${booking.systemName ? ` (${booking.systemName})` : ""}`
-      : "No publicly detectable online booking";
-
-  const notesLine = business.notes?.trim()
-    ? `"${business.notes.trim().slice(0, 500)}"`
-    : "None";
-
-  const weakest =
-    audit
-      ? Object.entries(audit.categoryScores)
-          .sort((a, b) => a[1].score - b[1].score)
-          .slice(0, 2)
-          .map(([name, s]) => `${name} (${s.score}/100)`)
-          .join(", ")
-      : "Unknown";
-
-  const findingLines =
-    (audit?.findings ?? [])
-      .filter((f) => f.type !== "STRENGTH")
-      .slice(0, 4)
-      .map((f) => `- [${f.category}] ${f.title} — ${f.evidence}`)
-      .join("\n") || "- None recorded";
-
-  const strengthLines =
-    (audit?.findings ?? [])
-      .filter((f) => f.type === "STRENGTH")
-      .slice(0, 3)
-      .map((f) => `- [${f.category}] ${f.title} — ${f.evidence}`)
-      .join("\n") || "- None recorded";
-
-  const reportOpportunities =
-    aiReport?.opportunities?.slice(0, 3).map((o) => `- ${o}`).join("\n") || "- None";
+function buildUserPrompt(business: Business): string {
+  const category = business.categories?.filter(Boolean).join(", ") || "local service";
+  const city = business.location?.city?.trim();
+  const cityLine = city ? `- City: ${city}${business.location?.state ? `, ${business.location.state}` : ""}` : "- City: not known — do not mention one";
 
   return `
-BUSINESS INFORMATION:
-- Name: ${business.name}
+BUSINESS:
+- Name (use exactly): ${business.name}
 - Category: ${category}
-- Location: ${location}
-- Rating: ${rating}
-- Phone: ${business.phone || "Not provided"}
-- Website: ${websiteUrl || "None found"}
-- Facebook page: ${business.metadata?.facebookUrl || "unknown"}
+${cityLine}
 
-BOOKING SYSTEM:
-${bookingLine}
+Write the message now, following the 3-line shape exactly. At most 45 words. Remember: a cold first impression — no audit details, no NextCall, no familiarity.`;
+}
 
-OWNER-PROVIDED CONTEXT (verified — treat as ground truth):
-${notesLine}
+/** Anything in here means the model slipped back into "we already know you" mode. */
+const BANNED_MESSAGE_PATTERNS: RegExp[] = [
+  /nextcall/i,
+  /receptionist/i,
+  /\b24\s*\/\s*7\b/i,
+  /missed\s+(call|opportunity|customer)/i,
+  /lost\s+(customer|money|lead)/i,
+  /(doesn'?t|does not|don'?t|do not)\s+(have|see|offer)/i,
+  /no online booking/i,
+  /(your|their)\s+(rating|review)s?\s+(is|are)\s+(impressive|great|amazing)/i,
+  /as you know/i,
+  /following up/i,
+];
 
-DETERMINISTIC AUDIT RESULT:
-${audit ? `- Overall score: ${audit.overallScore}/100 (confidence: ${audit.confidence})` : "- No audit available"}
-- Weakest categories: ${weakest}
+/** Checks the draft stayed inside the cold-outreach skeleton. */
+function validateColdMessage(message: string, business: Business): string | null {
+  const text = message.trim();
 
-AUDIT FINDINGS (non-strengths):
-${findingLines}
+  if (!/^hey\b/i.test(text)) return "must open with a Hey greeting";
+  if (!/\baudit\b/i.test(text)) return "must offer the audit";
+  if (!text.toLowerCase().includes(business.name.toLowerCase())) return "must address the business by name";
+  for (const pattern of BANNED_MESSAGE_PATTERNS) {
+    if (pattern.test(text)) return `contains banned phrasing (${pattern})`;
+  }
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words > 60) return `too long (${words} words)`;
 
-STRENGTHS:
-${strengthLines}
+  return null;
+}
 
-REPORT OPPORTUNITIES:
-${reportOpportunities}
+/** The deterministic shape the user wrote — used when the AI drifts or fails. */
+function fallbackFacebookMessage(business: Business): string {
+  const name = business.name;
+  const city = business.location?.city?.trim();
 
-Write the Facebook message now. Remember: 2-4 sentences, at most 55 words, plain text, open with one detail that is only true for THIS business, one NextCall sentence tied to a real gap, one closing question.`;
+  return [
+    `Hey ${name}! 👋`,
+    "",
+    `I came across your business while researching local companies${city ? ` in ${city}` : ""}. I noticed a few things on your online presence that might be worth a quick look.`,
+    "",
+    `I put together a quick audit for ${name} — would you be open to seeing it?`,
+  ].join("\n");
 }
 
 /** Trims the small messes models add around an otherwise clean answer. */
@@ -146,56 +124,68 @@ function tidyMessage(raw: string): string {
 
 export class FacebookOutreachService {
   /**
-   * Writes the short page message from the business's audit data.
-   * Throws when the AI chain fails — callers decide how fatal that is.
+   * Writes the short page message. Two AI attempts inside the strict skeleton;
+   * if both drift (or the chain is down), the deterministic template ships —
+   * this message is too important to leave the operator with nothing to copy.
    */
-  async generateFacebookMessage(
-    business: Business,
-    storedAudit: StoredAudit | null
-  ): Promise<string> {
-    const audit = storedAudit?.audit ?? null;
-    const aiReport = storedAudit?.aiReport ?? null;
+  async generateFacebookMessage(business: Business): Promise<string> {
+    let lastProblem = "the AI chain did not answer";
 
-    const llm = await generateLLMResponse({
-      system: SYSTEM_PROMPT,
-      user: buildUserPrompt(business, audit, aiReport),
-      temperature: 0.6,
-      maxOutputTokens: 500,
-      json: true,
-      model: AI_CHAINS.main,
-      timeoutMs: 30_000,
-      singleAttempt: true,
-    });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const llm = await generateLLMResponse({
+          system: SYSTEM_PROMPT,
+          user: buildUserPrompt(business),
+          temperature: 0.6,
+          maxOutputTokens: 400,
+          json: true,
+          model: AI_CHAINS.main,
+          timeoutMs: 30_000,
+          singleAttempt: true,
+        });
 
-    logger.info(
-      `[FacebookOutreach] Message drafted by ${llm.provider} (${llm.model})${llm.fallback ? " [fallback]" : ""}.`
-    );
+        logger.info(
+          `[FacebookOutreach] Message drafted by ${llm.provider} (${llm.model})${llm.fallback ? " [fallback]" : ""}.`
+        );
 
-    let parsed: { message?: string };
-    try {
-      parsed = JSON.parse(llm.text) as { message?: string };
-    } catch {
-      // Some models answer with the bare string instead of JSON.
-      parsed = { message: llm.text };
+        let parsed: { message?: string };
+        try {
+          parsed = JSON.parse(llm.text) as { message?: string };
+        } catch {
+          // Some models answer with the bare string instead of JSON.
+          parsed = { message: llm.text };
+        }
+
+        const candidate = tidyMessage(parsed.message ?? "");
+        const validated = MessageSchema.safeParse({ message: candidate });
+        if (!validated.success) {
+          lastProblem = `shape check failed (${validated.error.issues.map((i) => i.code).join(", ")})`;
+          continue;
+        }
+
+        const problem = validateColdMessage(validated.data.message, business);
+        if (problem) {
+          lastProblem = problem;
+          logger.warn(`[FacebookOutreach] Draft rejected: ${problem}`);
+          continue;
+        }
+
+        return validated.data.message;
+      } catch (error) {
+        lastProblem = error instanceof Error ? error.message : String(error);
+        logger.warn(`[FacebookOutreach] Attempt ${attempt}/2 failed: ${lastProblem}`);
+      }
     }
 
-    const candidate = tidyMessage(parsed.message ?? "");
-    const validated = MessageSchema.safeParse({ message: candidate });
-    if (!validated.success) {
-      throw new Error(
-        `The Facebook message did not come back in a usable shape (${validated.error.issues
-          .map((i) => i.code)
-          .join(", ")}).`
-      );
-    }
-    return validated.data.message;
+    logger.warn(`[FacebookOutreach] Using the deterministic template for ${business.name}: ${lastProblem}`);
+    return fallbackFacebookMessage(business);
   }
 
   /**
    * Makes sure the prospect HAS a Facebook message: generates and saves one
    * when a page URL exists and no message is stored yet. Returns the stored
    * message, or null when there is nothing to do (no page URL). Safe to call
-   * repeatedly — the stored message is reused.
+   * repeatedly — the stored message is reused unless force is set.
    */
   async ensureFacebookMessage(
     prospectId: string,
@@ -214,8 +204,7 @@ export class FacebookOutreachService {
     const business = await persistenceService.getBusinessById(prospect.businessId);
     if (!business) return null;
 
-    const storedAudit = await auditPersistenceService.getLatestAudit(prospect.businessId);
-    const message = await this.generateFacebookMessage(business, storedAudit);
+    const message = await this.generateFacebookMessage(business);
     await prospectPersistenceService.updateFacebookMessage(prospectId, message);
     return message;
   }
