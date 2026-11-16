@@ -203,11 +203,11 @@ class AuditPipelineService {
 
     if (prospect) {
       // Facebook page → the pipeline's Facebook box and the outreach card.
-      // Reads it off the enriched business so a page discovered by the crawl
-      // (when the screenshot had none) counts too.
-      const facebookPageUrl =
-        (enrichedBusiness.metadata?.facebookUrl as string | undefined) ??
-        enrichedBusiness.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+      // STRICTLY the screenshot-verified URL (read off the About screenshot's
+      // address bar): a Facebook link the website crawl happened to find is
+      // often a dead or generic page the operator cannot message, so it must
+      // never put a prospect into the Facebook box.
+      const facebookPageUrl = enrichedBusiness.metadata?.facebookUrl as string | undefined;
       if (facebookPageUrl) {
         await prospectPersistenceService.setFacebookUrl(prospect.id, facebookPageUrl);
       }
@@ -318,9 +318,8 @@ class AuditPipelineService {
   /**
    * Best-effort: generate and store the short Facebook opener for the
    * business's prospect. A failure never fails the job — the operator can
-   * regenerate it from the prospect page. The page URL may come from the
-   * About screenshot (prospect field / business metadata) or from the
-   * website crawl's social links.
+   * regenerate it from the prospect page. Only the screenshot-verified page
+   * URL counts (prospect field or business metadata).
    */
   private async ensureFacebookMessageFor(business: Business, businessId: string): Promise<void> {
     try {
@@ -329,8 +328,7 @@ class AuditPipelineService {
 
       const hasFacebookPage =
         prospect.facebookUrl ||
-        (business.metadata?.facebookUrl as string | undefined) ||
-        business.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+        (business.metadata?.facebookUrl as string | undefined);
       if (!hasFacebookPage) return;
 
       const message = await facebookOutreachService.ensureFacebookMessage(prospect.id);

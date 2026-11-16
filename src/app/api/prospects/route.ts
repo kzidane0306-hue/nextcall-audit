@@ -64,12 +64,11 @@ export async function POST(request: NextRequest) {
       throw new Error("Failed to create prospect.");
     }
 
-    // Facebook page (read off the About screenshot) → the pipeline's Facebook
-    // box. Discovery businesses that link a Facebook page from their website
-    // get it from their enrichment as a fallback.
-    const facebookPageUrl =
-      (business.metadata?.facebookUrl as string | undefined) ??
-      business.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+    // Facebook page (read off the About screenshot's address bar) → the
+    // pipeline's Facebook box. Screenshot-verified URLs ONLY: a Facebook link
+    // the website crawl found on the business's site is often a dead or
+    // generic page, so it never puts a prospect into the Facebook box.
+    const facebookPageUrl = business.metadata?.facebookUrl as string | undefined;
     if (facebookPageUrl) {
       await prospectPersistenceService.setFacebookUrl(prospect.id, facebookPageUrl);
     }
