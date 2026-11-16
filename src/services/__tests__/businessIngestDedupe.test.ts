@@ -31,4 +31,18 @@ describe("dedupeKeysFor", () => {
     expect(dedupeKeyFor("Acme", null, "+1 406-995-3668")).toBe("p:4069953668");
     expect(dedupeKeyFor("Acme", null, null)).toBe("n:acme");
   });
+
+  it("adds the Facebook page key when the About screenshot showed the page URL", () => {
+    const keys = dedupeKeysFor("Utah Flood Guys", null, null, "f:100079163705243");
+    expect(keys).toContain("f:100079163705243");
+    expect(keys).toContain("n:utahfloodguys");
+    // The fb key outranks the name key (more specific identity).
+    expect(dedupeKeyFor("Utah Flood Guys", null, null, "f:100079163705243")).toBe(
+      "f:100079163705243"
+    );
+  });
+
+  it("keeps working without a Facebook key", () => {
+    expect(dedupeKeysFor("Acme", null, null, null)).toEqual(["n:acme"]);
+  });
 });

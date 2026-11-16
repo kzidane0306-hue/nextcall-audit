@@ -7,6 +7,7 @@ import { outreachPersistenceService } from "@/services/outreachPersistenceServic
 import { pickBestEmailForBusiness } from "@/services/contactEmailPicker";
 import { logger } from "@/lib/logger";
 import { SocialProfile, CrawlMetadata } from "@/types";
+import { normalizeFacebookPageUrl } from "@/lib/facebookUrl";
 
 import { getErrorMessage } from "@/lib/errors";
 // 1. Define the Schema at the top level
@@ -17,7 +18,13 @@ const UpdateProspectSchema = z.object({
   noteText: z.string().optional(),
   isSuppressed: z.boolean().optional(),             
   suppressionReason: z.string().nullable().optional(),
-  contactEmail: z.string().email("Invalid email address").nullable().optional()
+  contactEmail: z.string().email("Invalid email address").nullable().optional(),
+  /** true = the operator sent the Facebook message; false = undo. */
+  facebookSent: z.boolean().optional(),
+  /** Manual Facebook page URL fix (validated before it is stored). */
+  facebookUrl: z.string().min(1).nullable().optional(),
+  /** Operator-edited version of the short Facebook message. */
+  facebookMessage: z.string().min(1).max(700).optional()
 });
 
 export async function GET(
@@ -123,10 +130,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { status, priority, nextFollowUpAt, noteText, isSuppressed, suppressionReason, contactEmail } = parsed.data;
+    const { status, priority, nextFollowUpAt, noteText, isSuppressed, suppressionReason, contactEmail, facebookSent, facebookUrl, facebookMessage } = parsed.data;
 
     // Empty PATCH body signals "mark as viewed"
-    if (!status && !priority && !noteText && !nextFollowUpAt && isSuppressed === undefined && contactEmail === undefined) {
+    if (
+      !status &&
+      !priority &&
+      !noteText &&
+      !nextFollowUpAt &&
+      isSuppressed === undefined &&
+      contactEmail === undefined &&
+      facebookSent === undefined &&
+      facebookUrl === undefined &&
+      facebookMessage === undefined
+    ) {
       await prospectPersistenceService.markAsViewed(id);
     }
 
@@ -137,6 +154,25 @@ export async function PATCH(
     if (nextFollowUpAt !== undefined) await prospectPersistenceService.setNextFollowUp(id, nextFollowUpAt);
     if (noteText) await prospectPersistenceService.addNote(id, noteText);
     if (contactEmail !== undefined) await prospectPersistenceService.updateContactEmail(id, contactEmail);
+
+    // Facebook outreach: mark sent / undo, or fix the page URL by hand
+    if (facebookUrl !== undefined) {
+      if (facebookUrl === null) {
+        await prospectPersistenceService.resetFacebookSent(id);
+      } else {
+        const identity = normalizeFacebookPageUrl(facebookUrl);
+        if (!identity) {
+          return NextResponse.json(
+            { error: "That does not look like a Facebook page URL." },
+            { status: 400 }
+          );
+        }
+        await prospectPersistenceService.setFacebookUrl(id, identity.url);
+      }
+    }
+    if (facebookSent === true) await prospectPersistenceService.markFacebookSent(id);
+    if (facebookSent === false) await prospectPersistenceService.resetFacebookSent(id);
+    if (facebookMessage) await prospectPersistenceService.updateFacebookMessage(id, facebookMessage);
     
     // Handle suppression update
     if (isSuppressed !== undefined) {

@@ -7,6 +7,7 @@ import { prospectPersistenceService } from "@/services/prospectPersistenceServic
 import { mergeNotesIntoEnrichment, parseBusinessNotes } from "@/services/notesParser";
 import { applyWebsiteAuditBackfill } from "@/services/websiteAuditBackfill";
 import { aiReportService } from "@/services/aiReportService";
+import { facebookOutreachService } from "@/services/facebookOutreachService";
 import { logger } from "@/lib/logger";
 import { priorityService } from "@/services/priorityService";
 import { EnrichmentData } from "@/types";
@@ -165,6 +166,18 @@ export async function POST(request: NextRequest) {
           businessId,
           dedupeKey: `report-ready:${latestAuditRecord.id}`,
         });
+
+        // The short Facebook opener rides along with the report (best-effort:
+        // the operator can regenerate it from the prospect page).
+        if (prospect) {
+          try {
+            await facebookOutreachService.ensureFacebookMessage(prospect.id);
+          } catch (fbError) {
+            logger.warn(
+              `[API /audit] Facebook message generation failed for ${businessId}: ${getErrorMessage(fbError)}`
+            );
+          }
+        }
       } catch (aiError) {
         logger.error(
           `[API /audit] AI Report generation failed for ${businessId}: ${getErrorMessage(aiError)}`

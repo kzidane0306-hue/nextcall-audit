@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import {
   getAuditJobsCollection,
   getAuditsCollection,
@@ -57,10 +57,10 @@ const JOB_TOKENS: Record<string, { token: string; tone: "dim" | "green" | "amber
 };
 
 const TONE_CLASS: Record<string, string> = {
-  dim: "text-[#8fa1b3]",
-  green: "text-[#2fd583]",
-  amber: "text-[#f5a524]",
-  red: "text-[#ff5f56]",
+  dim: "text-[#66707d]",
+  green: "text-[#16a34a]",
+  amber: "text-[#d97706]",
+  red: "text-[#dc2626]",
 };
 
 /**
@@ -270,10 +270,10 @@ export default async function DashboardPage() {
         right={
           <>
             <span className="mc-label">clock</span>
-            <ConsoleClock className="text-[12px] text-[#f5a524]" />
+            <ConsoleClock className="text-[12px] text-[#d97706]" />
             <Link
               href="/dashboard/screenshot"
-              className="border border-[#2b3948] px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[#8fa1b3] hover:border-[#f5a524]/50 hover:text-[#f5a524]"
+              className="rounded-lg border border-[#cdd4dd] bg-white px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[#66707d] transition-colors hover:border-[#4f46e5]/50 hover:text-[#4f46e5]"
             >
               open intake console
             </Link>
@@ -282,7 +282,7 @@ export default async function DashboardPage() {
       />
 
       {/* TELEMETRY */}
-      <div className="flex flex-wrap items-stretch gap-px border border-[#1b2530] bg-[#0c1116]">
+      <div className="flex flex-wrap items-stretch gap-px overflow-hidden rounded-xl border border-[#e4e7ec] bg-[#e4e7ec] shadow-sm">
         <TelemetryCell label="pipeline" value={`${totalProspects} tracked`} led tone="green" />
         <TelemetryCell label="high opportunity" value={`${highOpportunity.capped ? `${COUNT_CAP}+` : highOpportunity.count} hot / high`} tone={highOpportunity.count > 0 ? "amber" : "dim"} />
         <TelemetryCell label="audit store" value={`${auditsStored} audits`} />
@@ -312,9 +312,9 @@ export default async function DashboardPage() {
       {/* ENGINE BLOCK */}
       <ConsolePanel
         title="engine block // load & motion"
-        right={<span className={`mc-label ${busy ? "text-[#f5a524]" : ""}`}>{busy ? "engine running" : "engine idle"}</span>}
+        right={<span className={`mc-label ${busy ? "text-[#d97706]" : ""}`}>{busy ? "engine running" : "engine idle"}</span>}
       >
-        <div className="grid gap-px bg-[#1b2530] lg:grid-cols-4">
+        <div className="grid gap-px bg-[#e4e7ec] lg:grid-cols-4">
           <Gauge
             label="daily fuel"
             value={sentToday}
@@ -355,7 +355,7 @@ export default async function DashboardPage() {
         <ConsolePanel title="pipeline funnel" right={<span className="mc-label">{totalProspects} prospects</span>}>
           <div className="px-4 py-3">
             {funnel.length === 0 ? (
-              <p className="py-4 text-[11px] text-[#4b5a68]">
+              <p className="py-4 text-[11px] text-[#8b95a3]">
                 pipeline is empty â€” discover businesses or load screenshots to fill it.
               </p>
             ) : (
@@ -377,13 +377,13 @@ export default async function DashboardPage() {
         <ConsolePanel
           title="top opportunities"
           right={
-            <Link href="/dashboard/pipeline" className="mc-label hover:text-[#f5a524]">
+            <Link href="/dashboard/pipeline" className="mc-label hover:text-[#4f46e5]">
               open pipeline â†’
             </Link>
           }
         >
           {topProspects.length === 0 ? (
-            <p className="px-4 py-6 text-[11px] text-[#4b5a68]">nothing scored yet.</p>
+            <p className="px-4 py-6 text-[11px] text-[#8b95a3]">nothing scored yet.</p>
           ) : (
             <ul className="mc-terminal">
               {topProspects.map((prospect) => {
@@ -391,13 +391,13 @@ export default async function DashboardPage() {
                 const score = prospect.priorityScore ?? 0;
                 return (
                   <li key={prospect.id} className="flex items-center gap-3 px-4 py-2 text-[11.5px]">
-                    <span className={`w-[38px] shrink-0 font-semibold ${score >= 55 ? "text-[#f5a524]" : "text-[#8fa1b3]"}`}>
+                    <span className={`w-[38px] shrink-0 font-semibold ${score >= 55 ? "text-[#d97706]" : "text-[#66707d]"}`}>
                       {score}
                     </span>
-                    <Link href={`/dashboard/pipeline/${prospect.id}`} className="min-w-0 flex-1 truncate text-[#c8d3dd] hover:text-[#f5a524]">
+                    <Link href={`/dashboard/pipeline/${prospect.id}`} className="min-w-0 flex-1 truncate text-[#1a2230] hover:text-[#4f46e5]">
                       {name}
                     </Link>
-                    <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#4b5a68]">
+                    <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#8b95a3]">
                       {STATUS_LABELS[prospect.pipelineStatus] ?? prospect.pipelineStatus}
                     </span>
                   </li>
@@ -413,31 +413,31 @@ export default async function DashboardPage() {
         <ConsolePanel
           title="operations log"
           right={
-            <Link href="/dashboard/screenshot" className="mc-label hover:text-[#f5a524]">
+            <Link href="/dashboard/screenshot" className="mc-label hover:text-[#4f46e5]">
               full console â†’
             </Link>
           }
         >
           {recentJobs.length === 0 ? (
-            <p className="px-4 py-6 text-[11px] text-[#4b5a68]">no operations yet.</p>
+            <p className="px-4 py-6 text-[11px] text-[#8b95a3]">no operations yet.</p>
           ) : (
             <ul className="mc-terminal">
               {recentJobs.map((job) => {
                 const token = JOB_TOKENS[job.status] ?? JOB_TOKENS.QUEUED;
                 return (
                   <li key={job.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-2 text-[11.5px]">
-                    <span className="w-[64px] shrink-0 text-[#4b5a68]">{formatTime(job.createdAt)}</span>
+                    <span className="w-[64px] shrink-0 text-[#8b95a3]">{formatTime(job.createdAt)}</span>
                     <span className={`w-[52px] shrink-0 font-semibold ${TONE_CLASS[token.tone]}`}>
                       [{token.token}]
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className={job.status === "RUNNING" ? "text-[#f5a524]" : "text-[#c8d3dd]"}>{job.businessName}</span>
-                      {job.stage === "REPORT" && <span className="text-[#4b5a68]"> // AI REPORT</span>}
+                      <span className={job.status === "RUNNING" ? "text-[#d97706]" : "text-[#1a2230]"}>{job.businessName}</span>
+                      {job.stage === "REPORT" && <span className="text-[#8b95a3]">{" // AI REPORT"}</span>}
                       {job.status === "RUNNING" && job.phase && (
-                        <span className="text-[#f5a524]"> â–¸ {job.phase}</span>
+                        <span className="text-[#d97706]"> â–¸ {job.phase}</span>
                       )}
-                      {job.note && <span className="block text-[#2fd583]">âœ“ {job.note}</span>}
-                      {job.lastError && <span className="block text-[#ff9a93]">! {job.lastError}</span>}
+                      {job.note && <span className="block text-[#16a34a]">âœ“ {job.note}</span>}
+                      {job.lastError && <span className="block text-[#dc2626]">! {job.lastError}</span>}
                     </span>
                   </li>
                 );
@@ -450,31 +450,31 @@ export default async function DashboardPage() {
         <ConsolePanel
           title="recent activity"
           right={
-            <Link href="/dashboard/notifications" className="mc-label hover:text-[#f5a524]">
+            <Link href="/dashboard/notifications" className="mc-label hover:text-[#4f46e5]">
               all events â†’
             </Link>
           }
         >
           {notifications.length === 0 ? (
-            <p className="px-4 py-6 text-[11px] text-[#4b5a68]">nothing happened yet.</p>
+            <p className="px-4 py-6 text-[11px] text-[#8b95a3]">nothing happened yet.</p>
           ) : (
             <ul className="mc-terminal">
               {notifications.map((notification) => (
                 <li key={notification.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-2 text-[11.5px]">
-                  <span className="w-[64px] shrink-0 text-[#4b5a68]">{formatTime(notification.createdAt)}</span>
+                  <span className="w-[64px] shrink-0 text-[#8b95a3]">{formatTime(notification.createdAt)}</span>
                   <span className="min-w-0 flex-1">
                     {notification.href ? (
-                      <Link href={notification.href} className="text-[#c8d3dd] hover:text-[#f5a524]">
+                      <Link href={notification.href} className="text-[#1a2230] hover:text-[#4f46e5]">
                         {notification.title}
                       </Link>
                     ) : (
-                      <span className="text-[#c8d3dd]">{notification.title}</span>
+                      <span className="text-[#1a2230]">{notification.title}</span>
                     )}
                     {notification.body && (
-                      <span className="block truncate text-[#4b5a68]">{notification.body}</span>
+                      <span className="block truncate text-[#8b95a3]">{notification.body}</span>
                     )}
                   </span>
-                  <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#4b5a68]">
+                  <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#8b95a3]">
                     {notification.type.replace(/_/g, " ")}
                   </span>
                 </li>

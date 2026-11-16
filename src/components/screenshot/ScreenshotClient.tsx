@@ -104,11 +104,11 @@ const STAGES = [
 ] as const;
 
 const STATUS_TOKENS: Record<JobRow["status"], { token: string; className: string }> = {
-  QUEUED: { token: "WAIT", className: "text-[#8fa1b3]" },
-  RUNNING: { token: "RUN", className: "text-[#f5a524]" },
-  DONE: { token: "OK", className: "text-[#2fd583]" },
-  FAILED: { token: "RETRY", className: "text-[#f5a524]" },
-  DEAD: { token: "FAIL", className: "text-[#ff5f56]" },
+  QUEUED: { token: "WAIT", className: "text-[#66707d]" },
+  RUNNING: { token: "RUN", className: "text-[#d97706]" },
+  DONE: { token: "OK", className: "text-[#16a34a]" },
+  FAILED: { token: "RETRY", className: "text-[#d97706]" },
+  DEAD: { token: "FAIL", className: "text-[#dc2626]" },
 };
 
 const ENGINE_CELLS = [
@@ -249,12 +249,24 @@ export default function ScreenshotClient() {
     };
   }, [loadQueue, loadSendState]);
 
+  // "Dispatching" is a time window, not a stored flag — it is refreshed on
+  // the clock tick so the render itself stays pure (no Date.now() inline).
+  const [sendActive, setSendActive] = useState(false);
+
   useEffect(() => {
-    const tick = () => setClock(new Date().toLocaleTimeString("en-GB", { hour12: false }));
-    tick();
+    const tick = () => {
+      setClock(new Date().toLocaleTimeString("en-GB", { hour12: false }));
+      setSendActive(
+        send?.lastRunAt ? Date.now() - new Date(send.lastRunAt).getTime() < 120_000 : false
+      );
+    };
+    const first = setTimeout(tick, 0);
     const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, [send]);
 
   // --- file handling -------------------------------------------------------
   const setFile = (slot: Slot, file: File | null) => {
@@ -471,9 +483,7 @@ export default function ScreenshotClient() {
   const activePhases = new Set(
     jobs.filter((job) => job.status === "RUNNING").map((job) => job.phase ?? "")
   );
-  const sendActive = send?.lastRunAt
-    ? Date.now() - new Date(send.lastRunAt).getTime() < 120_000
-    : false;
+
   const reportWaiting = jobs.filter(
     (job) => job.stage === "REPORT" && (job.status === "QUEUED" || job.status === "RUNNING")
   ).length;
@@ -518,7 +528,7 @@ export default function ScreenshotClient() {
   return (
     <div className="flex flex-col gap-4">
       {/* TELEMETRY STRIP */}
-      <div className="flex flex-wrap items-stretch gap-px border border-[#1b2530] bg-[#0c1116]">
+      <div className="flex flex-wrap items-stretch gap-px overflow-hidden rounded-xl border border-[#e4e7ec] bg-[#e4e7ec] shadow-sm">
         <McCell label="system" value="ONLINE" tone="green" led />
         <McCell label="vision engine" value="NVIDIA NEMOTRON-VL" />
         <McCell label="fallback chain" value="GROK ▸ ROUTER" />
@@ -535,27 +545,27 @@ export default function ScreenshotClient() {
 
       {/* AI ENGINE RACK — which brain is the machine using right now */}
       <section className="mc-panel">
-        <div className="border-b border-[#1b2530] px-4 py-2.5">
+        <div className="border-b border-[#e4e7ec] px-4 py-2.5">
           <span className="mc-label">ai engines // live routing</span>
         </div>
-        <div className="grid gap-px bg-[#1b2530] sm:grid-cols-3">
+        <div className="grid gap-px bg-[#e4e7ec] sm:grid-cols-3">
           {ENGINE_CELLS.map((cell) => {
             const state = engineState(cell.id);
             const status = state.active
-              ? { text: "ACTIVE — SERVING NOW", cls: "text-[#f5a524]", led: "mc-led-amber" }
+              ? { text: "ACTIVE — SERVING NOW", cls: "text-[#d97706]", led: "mc-led-amber" }
               : state.last
-                ? { text: `last used ${timeAgo(state.last)}`, cls: "text-[#2fd583]", led: "mc-led-green" }
-                : { text: cell.id === "grok" ? "reserve · key not set" : "idle", cls: "text-[#64748b]", led: "mc-led-dim" };
+                ? { text: `last used ${timeAgo(state.last)}`, cls: "text-[#16a34a]", led: "mc-led-green" }
+                : { text: cell.id === "grok" ? "reserve · key not set" : "idle", cls: "text-[#8b95a3]", led: "mc-led-dim" };
             return (
               <div
                 key={cell.id}
-                className={`flex flex-col gap-1.5 px-4 py-3 ${state.active ? "bg-[#f5a524]/[0.06]" : "bg-[#0c1116]"}`}
+                className={`flex flex-col gap-1.5 px-4 py-3 ${state.active ? "bg-[#d97706]/[0.06]" : "bg-[#ffffff]"}`}
               >
                 <div className="flex items-center gap-2">
                   <span className={`mc-led ${status.led}`} />
                   <span
                     className={`text-[11px] font-semibold tracking-[0.1em] ${
-                      state.active ? "text-[#f5a524]" : "text-[#c8d3dd]"
+                      state.active ? "text-[#d97706]" : "text-[#1a2230]"
                     }`}
                   >
                     {cell.label}
@@ -564,7 +574,7 @@ export default function ScreenshotClient() {
                 <span className={`text-[10px] uppercase tracking-[0.14em] ${status.cls}`}>
                   {status.text}
                 </span>
-                <span className="text-[10px] text-[#4b5a68]">{cell.role}</span>
+                <span className="text-[10px] text-[#8b95a3]">{cell.role}</span>
               </div>
             );
           })}
@@ -573,17 +583,17 @@ export default function ScreenshotClient() {
 
       {/* ENGINE BLOCK — the moving parts: fuel, load, pistons, gears */}
       <section className="mc-panel">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1b2530] px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e4e7ec] px-4 py-2.5">
           <span className="mc-label">engine block // load &amp; motion</span>
           <span className="flex items-center gap-2">
-            <Cog className={`h-3.5 w-3.5 ${busy ? "mc-gear text-[#f5a524]" : "text-[#3b4a59]"}`} />
-            <Cog className={`h-3 w-3 ${busy ? "mc-gear-rev text-[#8fa1b3]" : "text-[#3b4a59]"}`} />
-            <span className={`mc-label ${busy ? "text-[#f5a524]" : ""}`}>
+            <Cog className={`h-3.5 w-3.5 ${busy ? "mc-gear text-[#d97706]" : "text-[#c6cdd6]"}`} />
+            <Cog className={`h-3 w-3 ${busy ? "mc-gear-rev text-[#66707d]" : "text-[#c6cdd6]"}`} />
+            <span className={`mc-label ${busy ? "text-[#d97706]" : ""}`}>
               {busy ? "engine running" : "engine idle"}
             </span>
           </span>
         </div>
-        <div className="grid gap-px bg-[#1b2530] lg:grid-cols-4">
+        <div className="grid gap-px bg-[#e4e7ec] lg:grid-cols-4">
           <Gauge
             label="daily fuel"
             value={send?.sentToday ?? 0}
@@ -613,13 +623,13 @@ export default function ScreenshotClient() {
             footer={jobs.find((job) => job.status === "RUNNING")?.phase ?? "no job in flight"}
           />
 
-          <div className="flex flex-col justify-center gap-3 bg-[#0c1116] px-4 py-3">
+          <div className="flex flex-col justify-center gap-3 bg-[#ffffff] px-4 py-3">
             <span className="mc-label">cylinders</span>
             <div className="flex items-end gap-1.5">
               {Array.from({ length: 9 }).map((_, index) => (
                 <span
                   key={index}
-                  className={`w-1.5 bg-[#f5a524] ${busy ? "mc-piston" : ""}`}
+                  className={`w-1.5 bg-[#d97706] ${busy ? "mc-piston" : ""}`}
                   style={{
                     height: `${10 + (index % 4) * 7}px`,
                     animationDelay: `${index * 0.08}s`,
@@ -628,7 +638,7 @@ export default function ScreenshotClient() {
                 />
               ))}
             </div>
-            <span className="text-[10px] text-[#4b5a68]">
+            <span className="text-[10px] text-[#8b95a3]">
               {busy
                 ? "intake feeding the line — audits continue even when sending pauses"
                 : "standing by — load screenshots into the bays"}
@@ -639,13 +649,13 @@ export default function ScreenshotClient() {
 
       {/* PIPELINE SCHEMATIC */}
       <section className="mc-panel">
-        <div className="flex items-center justify-between border-b border-[#1b2530] px-4 py-2.5">
+        <div className="flex items-center justify-between border-b border-[#e4e7ec] px-4 py-2.5">
           <span className="mc-label">
-            pipeline <span className="mc-blink text-[#f5a524]">▮</span> live
+            pipeline <span className="mc-blink text-[#d97706]">▮</span> live
           </span>
           <span className="mc-label">every stage below is real — fed by the workers</span>
         </div>
-        <ol className="flex flex-wrap items-stretch gap-px bg-[#0c1116] p-3">
+        <ol className="flex flex-wrap items-stretch gap-px bg-[#ffffff] p-3">
           {STAGES.map((stage, index) => {
             const active = stageState(stage);
             const badge = stage === "INTAKE" ? stats.QUEUED : stage === "AI REPORT" ? reportWaiting : null;
@@ -654,20 +664,20 @@ export default function ScreenshotClient() {
                 {index > 0 && (
                   <span
                     className={`mx-1 hidden h-px w-5 shrink-0 sm:block ${
-                      active ? "mc-connector-live" : "bg-[#2b3948]"
+                      active ? "mc-connector-live" : "bg-[#cdd4dd]"
                     }`}
                     aria-hidden
                   />
                 )}
                 <div
                   className={`flex items-center gap-2 border px-2.5 py-2 ${
-                    active ? "mc-stage-active" : "border-[#1b2530] bg-[#10171e]"
+                    active ? "mc-stage-active" : "border-[#e4e7ec] bg-[#f1f3f6]"
                   }`}
                 >
                   <span className={`mc-led ${active ? "mc-led-amber" : "mc-led-dim"}`} />
                   <span
                     className={`text-[10px] uppercase tracking-[0.14em] ${
-                      active ? "text-[#f7c469]" : "text-[#64748b]"
+                      active ? "text-[#b45309]" : "text-[#8b95a3]"
                     }`}
                   >
                     {stage}
@@ -676,8 +686,8 @@ export default function ScreenshotClient() {
                     <span
                       className={`px-1 text-[10px] ${
                         active
-                          ? "border border-[#f5a524]/45 bg-[#f5a524]/10 text-[#f5a524]"
-                          : "border border-[#2b3948] text-[#8fa1b3]"
+                          ? "border border-[#d97706]/45 bg-[#d97706]/10 text-[#d97706]"
+                          : "border border-[#cdd4dd] text-[#66707d]"
                       }`}
                     >
                       {badge}
@@ -692,7 +702,7 @@ export default function ScreenshotClient() {
 
       {/* INTAKE CONSOLE */}
       <section className="mc-panel">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1b2530] px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e4e7ec] px-4 py-2.5">
           <span className="mc-label">intake // load screenshots</span>
           <span className="mc-label">paste with ctrl+v · both bays = auto-queue</span>
         </div>
@@ -708,11 +718,11 @@ export default function ScreenshotClient() {
                 <div key={slot} className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <span className="mc-label">
-                      {meta.bay} <span className="text-[#c8d3dd]">// {meta.title}</span>
+                      {meta.bay} <span className="text-[#1a2230]">{`// ${meta.title}`}</span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       <span className={`mc-led ${loaded ? "mc-led-green" : "mc-led-dim"}`} />
-                      <span className={`text-[10px] uppercase tracking-[0.14em] ${loaded ? "text-[#2fd583]" : "text-[#64748b]"}`}>
+                      <span className={`text-[10px] uppercase tracking-[0.14em] ${loaded ? "text-[#16a34a]" : "text-[#8b95a3]"}`}>
                         {loaded ? "locked" : "no media"}
                       </span>
                     </span>
@@ -732,8 +742,8 @@ export default function ScreenshotClient() {
                     }}
                     className={`mc-brackets flex h-52 cursor-pointer flex-col items-center justify-center p-3 text-center transition-colors ${
                       preview
-                        ? "mc-viewport border border-[#2fd583]/40"
-                        : "border border-dashed border-[#2b3948] bg-[#10171e] hover:border-[#f5a524]/40 hover:bg-[#f5a524]/[0.03]"
+                        ? "mc-viewport border border-[#16a34a]/40"
+                        : "border border-dashed border-[#cdd4dd] bg-[#f1f3f6] hover:border-[#4f46e5]/40 hover:bg-[#4f46e5]/[0.04]"
                     }`}
                   >
                     {preview ? (
@@ -743,17 +753,17 @@ export default function ScreenshotClient() {
                           <img
                             src={preview}
                             alt={`${meta.title} preview`}
-                            className="max-h-full max-w-full border border-[#2b3948] bg-[#05070a] p-0.5 object-contain shadow-[0_0_28px_rgba(47,213,131,0.14)]"
+                            className="max-h-full max-w-full border border-[#cdd4dd] bg-[#ffffff] p-0.5 object-contain shadow-[0_0_28px_rgba(47,213,131,0.14)]"
                           />
                         </div>
-                        <div className="mt-2 flex w-full items-center justify-between gap-2 border-t border-[#1b2530] pt-2">
+                        <div className="mt-2 flex w-full items-center justify-between gap-2 border-t border-[#e4e7ec] pt-2">
                           <span
-                            className="truncate text-[10px] text-[#8fa1b3]"
+                            className="truncate text-[10px] text-[#66707d]"
                             title={media[slot]?.name ?? ""}
                           >
                             {media[slot]?.name ?? "screenshot"}
                           </span>
-                          <span className="shrink-0 text-[10px] tabular-nums text-[#2fd583]">
+                          <span className="shrink-0 text-[10px] tabular-nums text-[#16a34a]">
                             {media[slot] && media[slot]!.width > 0
                               ? `${media[slot]!.width}×${media[slot]!.height} · ${(media[slot]!.bytes / 1024).toFixed(0)} KB`
                               : files[slot]
@@ -764,11 +774,11 @@ export default function ScreenshotClient() {
                       </>
                     ) : (
                       <>
-                        <ImageIcon className="h-5 w-5 text-[#64748b]" />
-                        <span className="text-[11px] uppercase tracking-[0.14em] text-[#8fa1b3]">
+                        <ImageIcon className="h-5 w-5 text-[#8b95a3]" />
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-[#66707d]">
                           drop or click
                         </span>
-                        <span className="text-[10px] text-[#4b5a68]">{meta.hint}</span>
+                        <span className="text-[10px] text-[#8b95a3]">{meta.hint}</span>
                       </>
                     )}
                   </div>
@@ -786,42 +796,42 @@ export default function ScreenshotClient() {
           </div>
 
           {error && (
-            <div className="mt-4 border border-[#ff5f56]/40 bg-[#ff5f56]/10 px-3 py-2 text-[11px] text-[#ff9a93]">
+            <div className="mt-4 border border-[#dc2626]/40 bg-[#dc2626]/10 px-3 py-2 text-[11px] text-[#dc2626]">
               ! {error}
             </div>
           )}
 
           {receipt && (
             <div className="mc-receipt mt-4">
-              <div className="flex items-center justify-between gap-3 border-b border-dashed border-[#2fd583]/30 px-4 py-2">
-                <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-[#2fd583]">
+              <div className="flex items-center justify-between gap-3 border-b border-dashed border-[#16a34a]/30 px-4 py-2">
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-[#16a34a]">
                   <span className="mc-led mc-led-green" />
                   commit accepted · receipt
                 </span>
                 <button
                   type="button"
                   onClick={() => setReceipt(null)}
-                  className="text-[#4b5a68] transition-colors hover:text-[#2fd583]"
+                  className="text-[#8b95a3] transition-colors hover:text-[#16a34a]"
                   aria-label="Dismiss receipt"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
 
-              <div className="grid gap-px bg-[#1b2530] sm:grid-cols-3">
-                <div className="bg-[#0c1116] px-4 py-2.5">
+              <div className="grid gap-px bg-[#e4e7ec] sm:grid-cols-3">
+                <div className="bg-[#ffffff] px-4 py-2.5">
                   <span className="mc-label">job ticket</span>
-                  <p className="mt-1 text-[12px] text-[#f5a524]">
+                  <p className="mt-1 text-[12px] text-[#d97706]">
                     #{receipt.jobId.slice(0, 8)}
                   </p>
                 </div>
-                <div className="bg-[#0c1116] px-4 py-2.5">
+                <div className="bg-[#ffffff] px-4 py-2.5">
                   <span className="mc-label">ai spent at intake</span>
-                  <p className="mt-1 text-[12px] text-[#2fd583]">0 tokens — nothing read yet</p>
+                  <p className="mt-1 text-[12px] text-[#16a34a]">0 tokens — nothing read yet</p>
                 </div>
-                <div className="bg-[#0c1116] px-4 py-2.5">
+                <div className="bg-[#ffffff] px-4 py-2.5">
                   <span className="mc-label">logged</span>
-                  <p className="mt-1 text-[12px] text-[#c8d3dd]">{receipt.at}</p>
+                  <p className="mt-1 text-[12px] text-[#1a2230]">{receipt.at}</p>
                 </div>
               </div>
 
@@ -831,12 +841,12 @@ export default function ScreenshotClient() {
                   {["VISION READ", "DEDUPE CHECK", "CRAWL", "AUDIT ENGINE", "PROSPECT", "AI REPORT"].map(
                     (step, index) => (
                       <span key={step} className="flex items-center gap-2">
-                        {index > 0 && <span className="text-[#2b3948]" aria-hidden>▸</span>}
+                        {index > 0 && <span className="text-[#cdd4dd]" aria-hidden>▸</span>}
                         <span
                           className={`border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${
                             index === 0
-                              ? "mc-stage-active border-[#f5a524] text-[#f7c469]"
-                              : "border-[#1b2530] bg-[#10171e] text-[#64748b]"
+                              ? "mc-stage-active border-[#d97706] text-[#b45309]"
+                              : "border-[#e4e7ec] bg-[#f1f3f6] text-[#8b95a3]"
                           }`}
                         >
                           {step}
@@ -846,7 +856,7 @@ export default function ScreenshotClient() {
                   )}
                 </div>
 
-                <p className="mt-3 text-[10px] text-[#4b5a68]">
+                <p className="mt-3 text-[10px] text-[#8b95a3]">
                   received: {receipt.media.join("   ·   ")}
                   {receipt.hasFacebook ? "   ·   both bays" : "   ·   bay-01 only"}
                   {" — the worker picks this up within a minute"}
@@ -859,7 +869,7 @@ export default function ScreenshotClient() {
             <Button
               onClick={handleQueue}
               disabled={submitting || !googleReady}
-              className="gap-2 rounded-none border border-[#2b3948] bg-[#10171e] px-4 font-mono text-[11px] uppercase tracking-[0.16em] text-[#c8d3dd] hover:bg-[#1b2530] hover:text-[#f5a524]"
+              className="gap-2 rounded-lg bg-indigo-600 px-4 font-mono text-[11px] uppercase tracking-[0.16em] text-white shadow-sm transition-colors hover:bg-indigo-700"
             >
               {submitting ? (
                 <>
@@ -873,7 +883,7 @@ export default function ScreenshotClient() {
                 </>
               )}
             </Button>
-            <span className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-[#8b95a3]">
               {!googleReady
                 ? "bay-01 (google) must be loaded first"
                 : files.facebook
@@ -886,7 +896,7 @@ export default function ScreenshotClient() {
 
       {/* OPERATIONS LOG */}
       <section className="mc-panel">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1b2530] px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e4e7ec] px-4 py-2.5">
           <span className="mc-label">operations log // queue</span>
           <div className="flex flex-wrap items-center gap-2">
             <McCell label="queued" value={String(stats.QUEUED)} />
@@ -897,7 +907,7 @@ export default function ScreenshotClient() {
               variant="ghost"
               size="sm"
               onClick={() => void loadQueue()}
-              className="gap-1.5 rounded-none font-mono text-[10px] uppercase tracking-[0.14em] text-[#64748b] hover:bg-[#10171e] hover:text-[#c8d3dd]"
+              className="gap-1.5 rounded-md font-mono text-[10px] uppercase tracking-[0.14em] text-[#8b95a3] hover:bg-[#f1f3f6] hover:text-[#4f46e5]"
             >
               <RefreshCw className="h-3 w-3" />
               refresh
@@ -906,13 +916,13 @@ export default function ScreenshotClient() {
         </div>
 
         {queueError && (
-          <p className="border-b border-[#f5a524]/30 bg-[#f5a524]/5 px-4 py-2 text-[11px] text-[#f5a524]">
+          <p className="border-b border-[#d97706]/30 bg-[#d97706]/5 px-4 py-2 text-[11px] text-[#d97706]">
             ! {queueError}
           </p>
         )}
 
         {jobs.length === 0 ? (
-          <p className="px-4 py-6 text-[11px] text-[#64748b]">
+          <p className="px-4 py-6 text-[11px] text-[#8b95a3]">
             no operations yet. load the intake bays above — the machine takes it from there.
           </p>
         ) : (
@@ -925,35 +935,35 @@ export default function ScreenshotClient() {
 
               return (
                 <li key={job.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-2.5 text-[11.5px]">
-                  <span className="w-[68px] shrink-0 text-[#4b5a68]">{time}</span>
+                  <span className="w-[68px] shrink-0 text-[#8b95a3]">{time}</span>
                   <span className={`w-[52px] shrink-0 font-semibold ${token.className}`}>
                     [{token.token}]
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={running ? "text-[#f5a524]" : "text-[#c8d3dd]"}>
+                    <span className={running ? "text-[#d97706]" : "text-[#1a2230]"}>
                       {job.businessName}
                     </span>
                     {job.stage === "REPORT" && (
-                      <span className="text-[#4b5a68]"> // AI REPORT</span>
+                      <span className="text-[#8b95a3]">{" // AI REPORT"}</span>
                     )}
                     {job.engine && (
-                      <span className="border border-[#2b3948] px-1 text-[9px] uppercase tracking-[0.12em] text-[#8fa1b3]">
+                      <span className="border border-[#cdd4dd] px-1 text-[9px] uppercase tracking-[0.12em] text-[#66707d]">
                         {job.engine}
                       </span>
                     )}
                     {job.status === "QUEUED" && job.attempts > 0 && (
-                      <span className="text-[#4b5a68]"> · retry {job.attempts}/{job.maxAttempts}</span>
+                      <span className="text-[#8b95a3]"> · retry {job.attempts}/{job.maxAttempts}</span>
                     )}
 
                     {running && job.phase && (
-                      <span className="ml-2 text-[#f5a524]">▸ {job.phase}</span>
+                      <span className="ml-2 text-[#d97706]">▸ {job.phase}</span>
                     )}
-                    {job.note && <span className="block text-[#2fd583]">✓ {job.note}</span>}
+                    {job.note && <span className="block text-[#16a34a]">✓ {job.note}</span>}
                     {job.lastError && (
-                      <span className="block text-[#ff9a93]">! {job.lastError}</span>
+                      <span className="block text-[#dc2626]">! {job.lastError}</span>
                     )}
                     {job.waitingUntil && (
-                      <span className="block text-[#4b5a68]">
+                      <span className="block text-[#8b95a3]">
                         · next attempt {new Date(job.waitingUntil).toLocaleTimeString("en-GB", { hour12: false })}
                       </span>
                     )}
@@ -964,7 +974,7 @@ export default function ScreenshotClient() {
                       size="sm"
                       variant="outline"
                       onClick={() => void handleRetry(job.id)}
-                      className="h-6 rounded-none border-[#2b3948] bg-transparent px-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#8fa1b3] hover:bg-[#10171e] hover:text-[#f5a524]"
+                      className="h-6 rounded-md border-[#cdd4dd] bg-transparent px-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#66707d] hover:bg-[#f1f3f6] hover:text-[#4f46e5]"
                     >
                       requeue
                     </Button>
@@ -996,12 +1006,12 @@ function Gauge({
   footer?: string;
 }) {
   const ratio = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
-  const stroke = tone === "green" ? "#2fd583" : tone === "red" ? "#ff5f56" : "#f5a524";
+  const stroke = tone === "green" ? "#16a34a" : tone === "red" ? "#dc2626" : "#d97706";
   const needleAngle = -90 + ratio * 180;
   const arcLength = 100.5; // π × 32, the length of the dial arc
 
   return (
-    <div className="flex flex-col gap-1.5 bg-[#0c1116] px-4 py-3">
+    <div className="flex flex-col gap-1.5 bg-[#ffffff] px-4 py-3">
       <span className="mc-label">{label}</span>
       <div className="flex items-center gap-3">
         <svg
@@ -1010,7 +1020,7 @@ function Gauge({
           role="img"
           aria-label={`${label}: ${value} of ${max}`}
         >
-          <path d="M 12 48 A 32 32 0 0 1 76 48" fill="none" stroke="#1b2530" strokeWidth="6" />
+          <path d="M 12 48 A 32 32 0 0 1 76 48" fill="none" stroke="#e4e7ec" strokeWidth="6" />
           <path
             d="M 12 48 A 32 32 0 0 1 76 48"
             fill="none"
@@ -1028,7 +1038,7 @@ function Gauge({
                 y1={48 - Math.cos(angle) * 26}
                 x2={44 + Math.sin(angle) * 22}
                 y2={48 - Math.cos(angle) * 22}
-                stroke="#3b4a59"
+                stroke="#c6cdd6"
                 strokeWidth="1"
               />
             );
@@ -1038,22 +1048,22 @@ function Gauge({
             y1="48"
             x2="44"
             y2="22"
-            stroke="#c8d3dd"
+            stroke="#1a2230"
             strokeWidth="1.5"
             transform={`rotate(${needleAngle} 44 48)`}
           />
-          <circle cx="44" cy="48" r="2.5" fill="#c8d3dd" />
+          <circle cx="44" cy="48" r="2.5" fill="#1a2230" />
         </svg>
         <div className="flex flex-col">
           <span className="text-[15px] leading-none" style={{ color: stroke }}>
             {value}
           </span>
-          <span className="text-[10px] uppercase tracking-[0.14em] text-[#4b5a68]">
+          <span className="text-[10px] uppercase tracking-[0.14em] text-[#8b95a3]">
             / {max} {unit}
           </span>
         </div>
       </div>
-      {footer && <span className="text-[10px] text-[#4b5a68]">{footer}</span>}
+      {footer && <span className="text-[10px] text-[#8b95a3]">{footer}</span>}
     </div>
   );
 }
@@ -1071,12 +1081,12 @@ function McCell({
 }) {
   const toneClass =
     tone === "green"
-      ? "text-[#2fd583]"
+      ? "text-[#16a34a]"
       : tone === "amber"
-        ? "text-[#f5a524]"
+        ? "text-[#d97706]"
         : tone === "red"
-          ? "text-[#ff5f56]"
-          : "text-[#c8d3dd]";
+          ? "text-[#dc2626]"
+          : "text-[#1a2230]";
   const ledClass =
     tone === "green" ? "mc-led-green" : tone === "amber" ? "mc-led-amber" : tone === "red" ? "mc-led-red" : "mc-led-dim";
 

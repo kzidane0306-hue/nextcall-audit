@@ -330,6 +330,8 @@ export interface BusinessSnapshot {
   name: string;
   phone?: string | null;
   website?: string | null;
+  /** Facebook page URL read off the About screenshot's address bar. */
+  facebookUrl?: string | null;
   location?: BusinessLocation | null;
   rating?: number | null;
   reviewCount?: number | null;
@@ -378,6 +380,17 @@ export interface Prospect {
   notes: Note[]; 
   isSuppressed: boolean; 
   suppressionReason: string | null; 
+
+  // --- FACEBOOK OUTREACH (from the About screenshot's address bar) ---
+  /** Canonical https://www.facebook.com/... page URL; absent on legacy rows. */
+  facebookUrl?: string | null;
+  /** READY = page known and no message sent yet; SENT = operator messaged them. */
+  facebookStatus?: 'READY' | 'SENT';
+  /** Short personalized message the AI wrote for the page. */
+  facebookMessage?: string | null;
+  /** When the operator sent the message on the page. */
+  facebookSentAt?: string | null;
+
   createdAt: string;
   updatedAt: string;
 }

@@ -43,6 +43,11 @@ export class ProspectPersistenceService {
 
       const now = new Date().toISOString();
     
+      // The Facebook page read off the About screenshot's address bar lands on
+      // the prospect at creation, so the pipeline's Facebook box can filter on
+      // it without touching the businesses collection.
+      const facebookUrl = (business?.metadata?.facebookUrl as string | undefined) ?? null;
+
       const newProspect: Prospect = {
         id: randomUUID(),
         businessId,
@@ -62,6 +67,7 @@ export class ProspectPersistenceService {
         notes: [],
         isSuppressed: false,
         suppressionReason: null,
+        ...(facebookUrl ? { facebookUrl, facebookStatus: 'READY' as const } : {}),
         createdAt: now,
         updatedAt: now,
       };
@@ -81,6 +87,7 @@ export class ProspectPersistenceService {
       name: business.name,
       phone: business.phone || null,
       website: business.website || null,
+      facebookUrl: (business.metadata?.facebookUrl as string | undefined) || null,
       location: business.location || null,
       rating: business.rating ?? null,
       reviewCount: business.reviewCount ?? null,
@@ -544,6 +551,89 @@ logger.error(`[ProspectPersistenceService] Failed to update contact email for ${
       logger.info(`[ProspectPersistenceService] Updated priority level for ${id}: ${level}`);
     } catch (error) {
       logger.error(`[ProspectPersistenceService] Failed to update priority level for ${id}:`, getErrorMessage(error));
+    }
+  }
+
+  // --- FACEBOOK OUTREACH ---------------------------------------------------
+
+  /**
+   * Stamps the Facebook page URL (read off the About screenshot's address
+   * bar) onto the prospect and marks it READY — that is the flag the
+   * pipeline's Facebook box filters on. A prospect already marked SENT is
+   * left alone so a re-run can never un-send it.
+   */
+  async setFacebookUrl(id: string, url: string): Promise<void> {
+    try {
+      const collection = await getProspectsCollection();
+      const prospect = (await collection.findOne({ id })) as unknown as Prospect | null;
+      if (!prospect || prospect.facebookStatus === 'SENT') return;
+
+      await collection.updateOne(
+        { id },
+        {
+          $set: {
+            facebookUrl: url,
+            facebookStatus: 'READY',
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      );
+      logger.info(`[ProspectPersistenceService] Facebook page ready for prospect ${id}.`);
+    } catch (error) {
+      logger.error(`[ProspectPersistenceService] Failed to set Facebook URL for ${id}:`, getErrorMessage(error));
+    }
+  }
+
+  /** Saves the AI-written Facebook message on the prospect. */
+  async updateFacebookMessage(id: string, message: string): Promise<void> {
+    try {
+      const collection = await getProspectsCollection();
+      await collection.updateOne(
+        { id },
+        { $set: { facebookMessage: message, updatedAt: new Date().toISOString() } }
+      );
+      logger.info(`[ProspectPersistenceService] Facebook message saved for prospect ${id}.`);
+    } catch (error) {
+      logger.error(`[ProspectPersistenceService] Failed to save Facebook message for ${id}:`, getErrorMessage(error));
+    }
+  }
+
+  /** The operator confirmed the message went out on the page. */
+  async markFacebookSent(id: string): Promise<void> {
+    try {
+      const collection = await getProspectsCollection();
+      await collection.updateOne(
+        { id },
+        {
+          $set: {
+            facebookStatus: 'SENT',
+            facebookSentAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      );
+      logger.info(`[ProspectPersistenceService] Facebook message marked sent for prospect ${id}.`);
+    } catch (error) {
+      logger.error(`[ProspectPersistenceService] Failed to mark Facebook sent for ${id}:`, getErrorMessage(error));
+    }
+  }
+
+  /** Undoes a premature "sent" mark (wrong click). */
+  async resetFacebookSent(id: string): Promise<void> {
+    try {
+      const collection = await getProspectsCollection();
+      await collection.updateOne(
+        { id },
+        {
+          $set: {
+            facebookStatus: 'READY',
+            facebookSentAt: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      );
+    } catch (error) {
+      logger.error(`[ProspectPersistenceService] Failed to reset Facebook sent for ${id}:`, getErrorMessage(error));
     }
   }
 

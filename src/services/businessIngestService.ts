@@ -1,10 +1,11 @@
 import "server-only";
 
 import { randomUUID } from "crypto";
-import { Business } from "@/types";
+import { Business, SocialProfile } from "@/types";
 import { persistenceService } from "@/services/persistenceService";
 import { getBusinessesCollection } from "@/lib/db";
 import { cleanValue, ExtractedScreenshotFields } from "@/services/screenshotExtractor";
+import { normalizeFacebookPageUrl } from "@/lib/facebookUrl";
 import { logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -51,17 +52,23 @@ function phoneKey(phone: string | null | undefined): string | null {
  * same business is caught even when the vision read differs between the two
  * screenshots (one read finds the website, the other doesn't, the phone is
  * printed on both, the name carries a different suffix…).
+ *
+ * `facebookKey` ("f:...") is included when the About screenshot showed the
+ * page's own URL in the address bar — the same page screenshotted twice then
+ * matches even if the name/website/phone reads disagree.
  */
 export function dedupeKeysFor(
   name: string,
   website: string | null,
-  phone?: string | null
+  phone?: string | null,
+  facebookKey?: string | null
 ): string[] {
   const keys = new Set<string>();
   const domain = website ? domainOf(website) : null;
   if (domain) keys.add(`d:${domain}`);
   const phoneFragment = phoneKey(phone);
   if (phoneFragment) keys.add(phoneFragment);
+  if (facebookKey) keys.add(facebookKey);
   if (name?.trim()) keys.add(`n:${normalizeName(name)}`);
   return [...keys];
 }
@@ -70,9 +77,10 @@ export function dedupeKeysFor(
 export function dedupeKeyFor(
   name: string,
   website: string | null,
-  phone?: string | null
+  phone?: string | null,
+  facebookKey?: string | null
 ): string {
-  const keys = dedupeKeysFor(name, website, phone);
+  const keys = dedupeKeysFor(name, website, phone, facebookKey);
   return keys[0] ?? `n:${normalizeName(name)}`;
 }
 
@@ -112,6 +120,11 @@ export interface SavedBusinessResult {
  * Merges the two reads (Google wins where both have a value — it is the
  * canonical listing; Facebook fills the gaps, above all the email address)
  * and saves the business. Returns the existing row untouched on a duplicate.
+ *
+ * The Facebook read's `pageUrl` (the address-bar URL) becomes the business's
+ * Facebook page: stored under metadata.facebookUrl so the crawl can never
+ * overwrite it, and mirrored into enrichment.socialProfiles as a proper
+ * facebook profile so the audit credits it.
  */
 export async function saveBusinessFromScreenshots(
   google: ExtractedScreenshotFields | null,
@@ -130,14 +143,35 @@ export async function saveBusinessFromScreenshots(
   const rating = google?.rating ?? facebook?.rating ?? null;
   const reviewCount = google?.reviewCount ?? facebook?.reviewCount ?? null;
 
-  const dedupeKey = dedupeKeyFor(name, website, phone);
-  const existing = await findExistingBusiness(dedupeKeysFor(name, website, phone));
+  // The page's own URL, read out of the address bar on the About screenshot.
+  // Anything that is not recognisably a Facebook page (a business website the
+  // model picked instead, google.com, junk) is dropped here.
+  const facebookIdentity = normalizeFacebookPageUrl(facebook?.pageUrl ?? null);
+  const facebookUrl = facebookIdentity?.url ?? null;
+
+  const dedupeKey = dedupeKeyFor(name, website, phone, facebookIdentity?.key ?? null);
+  const existing = await findExistingBusiness(
+    dedupeKeysFor(name, website, phone, facebookIdentity?.key ?? null)
+  );
 
   if (existing) {
     return { business: existing, duplicateOf: existing };
   }
 
   const id = randomUUID();
+
+  // The Facebook page as a proper social profile, so the deterministic audit
+  // and the AI report credit it (SOCIAL category) without any extra wiring.
+  const socialProfiles: SocialProfile[] = facebookUrl
+    ? [
+        {
+          platform: "facebook",
+          url: facebookUrl,
+          sourceUrl: "facebook about screenshot (address bar)",
+          confidence: 100,
+        },
+      ]
+    : [];
 
   const business: Business = {
     id,
@@ -153,25 +187,34 @@ export async function saveBusinessFromScreenshots(
     sources: ["MANUAL"],
     notes: buildNotes(facebook ?? {}),
     dedupeKey,
-    enrichment: email
-      ? {
-          status: "NOT_STARTED",
-          emails: [
-            {
-              address: email,
-              type: "BUSINESS" as const,
-              sourceUrl: "facebook about screenshot",
-              sourceType: "VISIBLE_TEXT" as const,
-              confidence: 100,
-            },
-          ],
-          preferredEmail: email,
-        }
-      : undefined,
+    // The page URL lives on metadata, NOT on enrichment: the website crawl
+    // rebuilds enrichment from scratch and would silently drop it.
+    metadata: facebookUrl ? { facebookUrl } : undefined,
+    enrichment:
+      email || socialProfiles.length > 0
+        ? {
+            status: "NOT_STARTED",
+            emails: email
+              ? [
+                  {
+                    address: email,
+                    type: "BUSINESS" as const,
+                    sourceUrl: "facebook about screenshot",
+                    sourceType: "VISIBLE_TEXT" as const,
+                    confidence: 100,
+                  },
+                ]
+              : undefined,
+            preferredEmail: email ?? null,
+            socialProfiles: socialProfiles.length > 0 ? socialProfiles : undefined,
+          }
+        : undefined,
   };
 
   await persistenceService.upsertBusiness(business);
-  logger.info(`[BusinessIngest] Saved "${name}" (${id}) from screenshots.`);
+  logger.info(
+    `[BusinessIngest] Saved "${name}" (${id}) from screenshots${facebookUrl ? ` — Facebook page ${facebookUrl}` : ""}.`
+  );
 
   return { business, duplicateOf: null };
 }

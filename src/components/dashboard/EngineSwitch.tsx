@@ -55,9 +55,14 @@ export function EngineSwitch() {
     }, []);
 
     useEffect(() => {
-        void refresh();
+        // Deferred by a tick: a synchronous setState inside the effect body
+        // cascades renders (react-hooks/set-state-in-effect).
+        const initial = window.setTimeout(() => { void refresh(); }, 0);
         const poll = window.setInterval(() => { void refresh(); }, STATUS_POLL_MS);
-        return () => window.clearInterval(poll);
+        return () => {
+            window.clearTimeout(initial);
+            window.clearInterval(poll);
+        };
     }, [refresh]);
 
     // The heartbeat keeper: while the engine is ON the open tab sends a
@@ -130,12 +135,12 @@ export function EngineSwitch() {
             className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold tracking-wide transition-colors disabled:opacity-60",
                 !status
-                    ? "border-[#2b3948] bg-[#10171e] text-muted-foreground"
+                    ? "border-[#cdd4dd] bg-[#f1f3f6] text-muted-foreground"
                     : live
-                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
                         : status.on
-                            ? "border-amber-500/60 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
-                            : "border-[#2b3948] bg-[#10171e] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                            ? "border-amber-500/60 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20"
+                            : "border-[#cdd4dd] bg-[#f1f3f6] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
         >
             <span

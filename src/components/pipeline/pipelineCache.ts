@@ -29,6 +29,7 @@ export interface EnrichedProspect extends Prospect {
  */
 export type PipelineFilter =
   | "DUE"
+  | "FACEBOOK"
   | "AWAITING"
   | "EMAILED"
   | "OPENED"

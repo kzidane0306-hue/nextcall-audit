@@ -13,6 +13,7 @@ import {
 } from "./pipelineCache";
 import { Card, CardContent } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
+import { FacebookIcon } from "@/components/ui/facebook-icon";
 import { logger } from "@/lib/logger";
 import { hasBeenEmailed, isProspectUnread } from "@/lib/pipelineReadState";
 import Link from "next/link";
@@ -39,6 +40,11 @@ const PIPELINE_VIEWS: PipelineView[] = [
         id: "DUE",
         label: "DUE NOW",
         hint: "Audits that are ready but were never emailed, plus follow-ups due today or already overdue.",
+    },
+    {
+        id: "FACEBOOK",
+        label: "FACEBOOK",
+        hint: "Businesses with a Facebook page waiting for their message — open one, copy the message, send it, mark it sent.",
     },
     {
         id: "OPENED",
@@ -206,24 +212,24 @@ export default function PipelineClient() {
                                 key={view.id}
                                 type="button"
                                 onClick={() => applyFilter(view.id)}
-                                className={`flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
+                                className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-all ${
                                     isActive
-                                        ? "border-[#f5a524] bg-[#f5a524]/10 text-[#f7c469]"
-                                        : "border-[#2b3948] bg-[#10171e] text-[#8fa1b3] hover:border-[#f5a524]/40 hover:text-[#c8d3dd]"
+                                        ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                                        : "border-border bg-white text-muted-foreground hover:border-indigo-300 hover:text-foreground"
                                 }`}
                             >
                                 {view.label}
-                                <span className={`tabular-nums ${isActive ? "text-[#f5a524]" : "text-[#4b5a68]"}`}>
+                                <span className={`tabular-nums ${isActive ? "text-indigo-100" : "text-muted-foreground/60"}`}>
                                     {count}
                                 </span>
                             </button>
                         );
                     })}
                 </div>
-                <p className="text-[11px] text-[#4b5a68]">
+                <p className="text-[11px] text-muted-foreground">
                     {PIPELINE_VIEWS.find((view) => view.id === activeFilter)?.hint ?? ""}
                     {truncated && (
-                        <span className="text-[#f5a524]">
+                        <span className="text-indigo-600">
                             {" "}showing the first {displayedProspects.length} of {counts[activeFilter] ?? 0} — narrow it with another box.
                         </span>
                     )}
@@ -238,6 +244,8 @@ export default function PipelineClient() {
                         <CardContent className="p-8 text-center text-gray-500">
                             {activeFilter === "DUE"
                                 ? "Nothing is due right now — every audit has been emailed and no follow-up has come round."
+                                : activeFilter === "FACEBOOK"
+                                ? "No Facebook messages waiting. Screenshot the About page of a business (with the address bar visible) and it lands here with a ready-to-copy message."
                                 : activeFilter === "OPENED"
                                 ? "No opens recorded yet. Opens are logged by the 1x1 pixel in the email and by the provider's open webhook."
                                 : activeFilter === "CLICKED"
@@ -257,11 +265,13 @@ export default function PipelineClient() {
                     const hasAudit = p.auditScore !== null;
                     const wasEmailed = hasBeenEmailed(p);
                     const outreachLabel = OUTREACH_STATE_LABELS[p.outreachState] ?? p.outreachState.replace(/_/g, " ").toLowerCase();
+                    const fbReady = p.facebookStatus === "READY";
+                    const fbSent = p.facebookStatus === "SENT";
 
                     return (
                         <Link href={`/dashboard/pipeline/${p.id}`} key={p.id} className="block">
-                            <Card className={`hover:shadow-md transition-shadow cursor-pointer mb-3 ${isUnread ? 'border-l-4 border-l-blue-500 bg-blue-50/30' : ''}`}>
-                            <CardContent className="p-4 flex justify-between items-center gap-3">
+                            <Card className={`mb-3 cursor-pointer rounded-xl transition-all hover:-translate-y-px hover:shadow-md ${isUnread ? 'border-l-4 border-l-blue-500 bg-blue-50/30' : ''}`}>
+                            <CardContent className="flex items-center justify-between gap-3 p-4">
                                 <div className="flex min-w-0 flex-col">
                                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                         <span className={`font-medium ${isUnread ? 'text-slate-900 font-bold' : 'text-slate-700'}`}>
@@ -278,20 +288,33 @@ export default function PipelineClient() {
                                                 {p.priorityLevel}
                                             </span>
                                         )}
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide ${
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide ${
                                             hasAudit ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
                                         }`}>
                                             {hasAudit ? '✓ Audit ran' : 'No audit yet'}
                                         </span>
                                         {isUnread && (
-                                            <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium uppercase tracking-wide">New</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full font-medium uppercase tracking-wide">New</span>
                                         )}
                                         {p.readByAutomation && (
                                             <span
                                                 title="The automation wrote and sent this audit email, so it is already marked read"
-                                                className="text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded font-medium uppercase tracking-wide"
+                                                className="text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full font-medium uppercase tracking-wide"
                                             >
                                                 AI sent
+                                            </span>
+                                        )}
+                                        {(fbReady || fbSent) && (
+                                            <span
+                                                title={fbSent ? "Facebook message already sent" : "Facebook message ready to copy and send"}
+                                                className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide ${
+                                                    fbSent
+                                                        ? "bg-green-100 text-green-700"
+                                                        : "bg-[#1877f2]/10 text-[#1877f2]"
+                                                }`}
+                                            >
+                                                <FacebookIcon className="h-2.5 w-2.5" />
+                                                {fbSent ? "FB sent" : "FB message due"}
                                             </span>
                                         )}
                                     </div>

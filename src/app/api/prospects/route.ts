@@ -64,6 +64,16 @@ export async function POST(request: NextRequest) {
       throw new Error("Failed to create prospect.");
     }
 
+    // Facebook page (read off the About screenshot) → the pipeline's Facebook
+    // box. Discovery businesses that link a Facebook page from their website
+    // get it from their enrichment as a fallback.
+    const facebookPageUrl =
+      (business.metadata?.facebookUrl as string | undefined) ??
+      business.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+    if (facebookPageUrl) {
+      await prospectPersistenceService.setFacebookUrl(prospect.id, facebookPageUrl);
+    }
+
     // In-app feed: a new prospect is the moment the pipeline list changes.
     await notificationService.notify({
       type: "PROSPECT_ADDED",
@@ -222,6 +232,10 @@ function filterForView(view: string): Record<string, unknown> {
 
   if (view === "AWAITING") return { outreachState: "UNCONTACTED" };
   if (view === "EMAILED") return { outreachState: { $ne: "UNCONTACTED" } };
+  // The Facebook box: prospects whose Facebook page is known and whose
+  // message has not been sent yet. Plain equality — the Data API evaluates
+  // it reliably (legacy rows never carry the field, so they stay out).
+  if (view === "FACEBOOK") return { facebookStatus: "READY" };
   if (view === "ALL") return {};
 
   if (STATUSES.includes(view as PipelineStatus)) {
@@ -380,7 +394,7 @@ async function loadCounts(): Promise<Record<string, number>> {
 
   const collection = await getProspectsCollection();
 
-  const [statusCounts, due, awaiting, opened, clicked] = await Promise.all([
+  const [statusCounts, due, awaiting, opened, clicked, facebookReady] = await Promise.all([
     Promise.all(
       STATUSES.map((status) =>
         collection.countDocuments({ pipelineStatus: status }, 1000).catch(() => 0)
@@ -390,6 +404,7 @@ async function loadCounts(): Promise<Record<string, number>> {
     collection.countDocuments({ outreachState: "UNCONTACTED" }, 1000).catch(() => 0),
     countTracked("OPENED"),
     countTracked("CLICKED"),
+    collection.countDocuments({ facebookStatus: "READY" }, 1000).catch(() => 0),
   ]);
 
   const counts: Record<string, number> = {
@@ -397,6 +412,7 @@ async function loadCounts(): Promise<Record<string, number>> {
     AWAITING: awaiting,
     OPENED: opened,
     CLICKED: clicked,
+    FACEBOOK: facebookReady,
   };
 
   STATUSES.forEach((status, index) => {

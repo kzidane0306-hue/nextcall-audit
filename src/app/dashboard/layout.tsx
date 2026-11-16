@@ -58,9 +58,12 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
     return (
         <nav className="flex flex-col gap-4 p-4">
-            <Link href="/dashboard" className="mb-4 flex items-center gap-2 text-sm font-semibold tracking-[0.14em] text-foreground">
-                <span className="flex h-7 w-7 items-center justify-center rounded-none border border-[#2b3948] bg-[#10171e] text-[10px] font-bold tracking-widest text-[#f5a524]">NC</span>
-                NEXTCALL // CONSOLE
+            <Link href="/dashboard" className="mb-4 flex items-center gap-2.5 text-sm font-semibold tracking-[0.14em] text-foreground">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-blue-600 text-[11px] font-bold tracking-widest text-white shadow-sm">NC</span>
+                <span className="flex flex-col leading-none">
+                    <span>NextCall</span>
+                    <span className="mt-1 text-[9px] font-medium tracking-[0.22em] text-muted-foreground">OUTREACH CONSOLE</span>
+                </span>
             </Link>
             <div className="flex flex-col gap-0.5">
                 {navItems.map((item) => {
@@ -73,9 +76,9 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                             onClick={onNavigate}
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
-                                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                                 isActive
-                                    ? "bg-primary/10 text-primary"
+                                    ? "bg-primary text-primary-foreground shadow-sm"
                                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                             )}
                         >
@@ -111,7 +114,7 @@ export default function DashboardLayout({
     return (
         <ToastProvider>
         <AutomationHeartbeat />
-        <div className="flex min-h-screen w-full flex-col mc-scope">
+        <div className="flex min-h-screen w-full flex-col nc-scope">
             {/* Desktop sidebar (sm and up) — collapsible */}
             {!isSidebarCollapsed && (
                 <aside className="fixed inset-y-0 left-0 z-10 hidden w-64 flex-col border-r bg-sidebar sm:flex">
@@ -135,7 +138,7 @@ export default function DashboardLayout({
             )}
 
             <div className={cn("flex min-w-0 flex-col transition-[padding] duration-200", isSidebarCollapsed ? "sm:pl-0" : "sm:pl-64")}>
-                <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b bg-background px-4 sm:px-6">
+                <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border/70 bg-background/80 px-4 backdrop-blur sm:px-6">
                     <div className="flex min-w-0 items-center gap-1.5">
                         <button
                             type="button"

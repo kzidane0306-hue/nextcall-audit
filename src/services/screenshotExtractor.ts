@@ -37,6 +37,8 @@ const ExtractedSchema = z.object({
   email: z.string().nullish(),
   services: z.array(z.string()).nullish(),
   hours: z.string().nullish(),
+  /** The URL printed in the browser's address bar (the page's own URL). */
+  pageUrl: z.string().nullish(),
 });
 
 export type ExtractedScreenshotFields = z.infer<typeof ExtractedSchema>;
@@ -56,21 +58,22 @@ Rules:
 - If a field is not visible, return null for it. Do NOT invent values.
 - Return ONLY a JSON object with keys: name, phone, website, address, rating, reviewCount, category, email, services, hours.`;
 
-const FACEBOOK_PROMPT = `You extract business details from a screenshot of a Facebook Page's "About", "Intro" or "Details" section.
+const FACEBOOK_PROMPT = `You extract business details from a screenshot of a Facebook Page's "About", "Intro" or "Details" section. The screenshot usually also shows the browser's address bar at the top.
 
 Rules:
 - Extract ONLY text and values that are clearly visible. Never guess or infer.
-- "email" is THE MOST IMPORTANT field. Look for an address in the contact details, the intro text, or anywhere else on the page. Return it exactly as printed.
+- "pageUrl" is THE PAGE'S OWN URL from the browser address bar shown in the screenshot (e.g. facebook.com/profile.php?id=100079163705243 or facebook.com/SomePageName). Return it exactly as printed, without quotes. If no address bar is visible, return null. NEVER put the business's website here.
+- "email" is THE MOST IMPORTANT field when no address bar is visible. Look for an address in the contact details, the intro text, or anywhere else on the page. Return it exactly as printed.
 - "name" is the page/business name shown at the top.
 - "phone" is a phone number if the page lists one.
-- "website" is a website link if the page lists one.
+- "website" is the business's own website link if the page lists one (NOT the facebook.com URL).
 - "address" is a street address or "Located in ..." text if shown.
 - "category" is the page category (e.g. "Landscaper", "Plumber", "Home service").
 - "services" is a list of services the page mentions, as short phrases (e.g. ["Landscape design", "Hardscaping"]).
 - "hours" is the opening hours as one line if shown.
 - "rating" and "reviewCount" are the star rating and number of reviews if shown (e.g. 4.9 and 12).
 - If a field is not visible, return null for it. Do NOT invent values.
-- Return ONLY a JSON object with keys: name, phone, website, address, rating, reviewCount, category, email, services, hours.`;
+- Return ONLY a JSON object with keys: name, phone, website, address, rating, reviewCount, category, email, services, hours, pageUrl.`;
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 

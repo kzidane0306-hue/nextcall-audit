@@ -11,7 +11,9 @@ import { logger } from "@/lib/logger";
 import { hasBeenEmailed } from "@/lib/pipelineReadState";
 import { normalizeExternalUrl, isValidExternalUrl } from "@/lib/externalUrl";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, Copy, Check, Loader2, Sparkles } from "lucide-react";
+import { FacebookIcon } from "@/components/ui/facebook-icon";
+import { normalizeFacebookPageUrl, buildMessengerUrl, buildBrowserFacebookUrl } from "@/lib/facebookUrl";
 
 import { getErrorMessage } from "@/lib/errors";
 import { useToast } from "@/components/ui/toast";
@@ -54,6 +56,14 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
     const [isRunningAudit, setIsRunningAudit] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
     const toast = useToast();
+
+    // Facebook outreach card state. The draft stays null until the operator
+    // types — the displayed value then falls back to the stored message, so
+    // a reload never needs a setState-in-effect.
+    const [fbMessageDraft, setFbMessageDraft] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+    const [isGeneratingFb, setIsGeneratingFb] = useState(false);
+    const [isMarkingFb, setIsMarkingFb] = useState(false);
 
     // Pure fetch without setState, so the mount effect can call it without
     // triggering react-hooks/set-state-in-effect (state updates happen in
@@ -338,6 +348,106 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
         }
     };
 
+    // --- Facebook outreach --------------------------------------------------
+    const handleCopyFbMessage = async () => {
+        const text = fbMessageInput.trim();
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            toast.success("Message copied", "Open the Facebook page and paste it into their chat.");
+            setTimeout(() => setCopied(false), 2500);
+        } catch {
+            // Clipboard API can be blocked — fall back to the classic select-and-copy.
+            try {
+                const helper = document.createElement("textarea");
+                helper.value = text;
+                document.body.appendChild(helper);
+                helper.select();
+                document.execCommand("copy");
+                document.body.removeChild(helper);
+                setCopied(true);
+                toast.success("Message copied");
+                setTimeout(() => setCopied(false), 2500);
+            } catch {
+                toast.error("Could not copy", "Select the message text and copy it manually.");
+            }
+        }
+    };
+
+    const handleSaveFbMessage = async () => {
+        const text = fbMessageInput.trim();
+        if (!text || !data) return;
+        try {
+            const res = await fetch(`/api/prospects/${prospectId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ facebookMessage: text }),
+            });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({ error: "Failed to save" }));
+                throw new Error(errData.error || "Failed to save the message");
+            }
+            const updatedProspect = (await res.json()).prospect;
+            setData(prev => prev ? { ...prev, prospect: updatedProspect } : prev);
+            patchCachedProspect(updatedProspect);
+            setFbMessageDraft(null);
+            toast.success("Message saved");
+        } catch (err) {
+            toast.error("Could not save the message", getErrorMessage(err));
+            logger.error("[ProspectDetail] Save Facebook message failed:", getErrorMessage(err));
+        }
+    };
+
+    const handleGenerateFbMessage = async (force: boolean) => {
+        setIsGeneratingFb(true);
+        try {
+            const res = await fetch(`/api/prospects/${prospectId}/facebook-message`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ force }),
+            });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({ error: "Generation failed" }));
+                throw new Error(errData.error || "Failed to generate the message");
+            }
+            const result = await res.json();
+            setFbMessageDraft(result.message as string);
+            setData(prev => prev ? { ...prev, prospect: { ...prev.prospect, facebookMessage: result.message } } : prev);
+            toast.success(force ? "New message written" : "Message ready", "Copy it, open the page, send it.");
+        } catch (err) {
+            toast.error("Message generation failed", getErrorMessage(err));
+            logger.error("[ProspectDetail] Facebook message generation failed:", getErrorMessage(err));
+        } finally {
+            setIsGeneratingFb(false);
+        }
+    };
+
+    const handleMarkFbSent = async (sent: boolean) => {
+        setIsMarkingFb(true);
+        try {
+            const res = await fetch(`/api/prospects/${prospectId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ facebookSent: sent }),
+            });
+            if (!res.ok) throw new Error("Failed to update");
+            const updatedProspect = (await res.json()).prospect;
+            setData(prev => prev ? { ...prev, prospect: updatedProspect } : prev);
+            patchCachedProspect(updatedProspect);
+            if (sent) {
+                toast.success("Marked as sent on Facebook", "It has left the Facebook box in the pipeline.");
+            } else {
+                toast.success("Marked as not sent");
+            }
+        } catch (err) {
+            toast.error("Could not update", getErrorMessage(err));
+            logger.error("[ProspectDetail] Facebook sent update failed:", getErrorMessage(err));
+        } finally {
+            setIsMarkingFb(false);
+        }
+    };
+
     if (isLoading) return <div className="p-8 text-center text-gray-500">Loading prospect details...</div>;
     if (!data) return (
         <div className="p-8 text-center">
@@ -363,6 +473,22 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
     const businessWebsite = normalizeExternalUrl(business.website);
     const snapshot = prospect.businessSnapshot;
     const snapshotWebsite = normalizeExternalUrl(snapshot?.website);
+
+    // Facebook outreach: the page URL from the prospect (with fallbacks) and
+    // the message the AI wrote — shown on the card above the audit.
+    const facebookUrl =
+        prospect.facebookUrl ||
+        (business.metadata?.facebookUrl as string | undefined) ||
+        snapshot?.facebookUrl ||
+        null;
+    const facebookIdentity = normalizeFacebookPageUrl(facebookUrl);
+    const storedFbMessage = prospect.facebookMessage ?? "";
+    const fbMessageInput = fbMessageDraft ?? storedFbMessage;
+    const fbDirty = fbMessageDraft !== null && fbMessageDraft.trim() !== storedFbMessage.trim();
+    const fbSent = prospect.facebookStatus === "SENT";
+    const browserFbUrl = facebookIdentity ? buildBrowserFacebookUrl(facebookUrl) : null;
+    const messengerFbUrl = facebookIdentity ? buildMessengerUrl(facebookUrl) : null;
+    const fbSentDate = prospect.facebookSentAt ? new Date(prospect.facebookSentAt).toLocaleDateString() : null;
 
     return (
         <div className="flex flex-col gap-6 p-4 sm:px-6 sm:py-6">
@@ -403,6 +529,148 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
 
                 {/* Left Column */}
                 <div className="lg:col-span-2 flex flex-col gap-6">
+
+                    {/* Facebook Outreach — deliberately ABOVE the audit: the whole
+                        job is copy → open → send, and it must be zero effort. */}
+                    {facebookUrl && facebookIdentity && (
+                        <Card className="overflow-hidden border-[#1877f2]/25 shadow-sm">
+                            <div className="h-1 w-full bg-gradient-to-r from-[#1877f2] via-indigo-500 to-indigo-600" />
+                            <CardContent className="flex flex-col gap-3 p-4 pt-4 sm:p-5 sm:pt-5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5">
+                                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1877f2] text-white shadow-sm">
+                                            <FacebookIcon className="h-4 w-4" />
+                                        </span>
+                                        <div>
+                                            <p className="text-sm font-semibold text-slate-900">Facebook Outreach</p>
+                                            <p className="text-[11px] text-muted-foreground">Copy the message → open the page → paste and send.</p>
+                                        </div>
+                                    </div>
+                                    {fbSent ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-medium text-green-700">
+                                            <Check className="h-3 w-3" />
+                                            Sent{fbSentDate ? ` · ${fbSentDate}` : ""}
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                                            Ready to send
+                                        </span>
+                                    )}
+                                </div>
+
+                                {storedFbMessage || fbMessageDraft ? (
+                                    <>
+                                        <Textarea
+                                            value={fbMessageInput}
+                                            onChange={(e) => setFbMessageDraft(e.target.value)}
+                                            rows={4}
+                                            className="min-h-[92px] resize-y rounded-xl border-border bg-white text-sm leading-relaxed text-slate-800"
+                                            aria-label="Facebook message"
+                                        />
+                                        <div className="flex flex-col gap-2 sm:flex-row">
+                                            <Button
+                                                variant="outline"
+                                                onClick={handleCopyFbMessage}
+                                                disabled={!fbMessageInput.trim()}
+                                                className="gap-2 rounded-lg sm:w-44"
+                                            >
+                                                {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                                                {copied ? "Copied!" : "Copy message"}
+                                            </Button>
+                                            <a
+                                                href={browserFbUrl ?? "#"}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-[#1877f2] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#166fe0]"
+                                            >
+                                                <FacebookIcon className="h-4 w-4" />
+                                                Open Facebook Page
+                                                <ExternalLink className="h-3.5 w-3.5 opacity-80" />
+                                            </a>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
+                                            {fbDirty && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSaveFbMessage}
+                                                    className="font-medium text-indigo-600 hover:underline"
+                                                >
+                                                    Save edit
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleGenerateFbMessage(true)}
+                                                disabled={isGeneratingFb}
+                                                className="text-muted-foreground transition-colors hover:text-foreground hover:underline disabled:opacity-50"
+                                            >
+                                                {isGeneratingFb ? "Writing…" : "Regenerate with AI"}
+                                            </button>
+                                            {!fbSent && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleMarkFbSent(true)}
+                                                    disabled={isMarkingFb}
+                                                    className="font-medium text-green-600 hover:underline disabled:opacity-50"
+                                                >
+                                                    Mark as sent
+                                                </button>
+                                            )}
+                                            {fbSent && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleMarkFbSent(false)}
+                                                    disabled={isMarkingFb}
+                                                    className="text-muted-foreground transition-colors hover:text-foreground hover:underline disabled:opacity-50"
+                                                >
+                                                    Undo sent
+                                                </button>
+                                            )}
+                                            {messengerFbUrl && (
+                                                <a
+                                                    href={messengerFbUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-muted-foreground transition-colors hover:text-foreground hover:underline"
+                                                >
+                                                    Messenger (m.me)
+                                                </a>
+                                            )}
+                                            <span className="text-muted-foreground/70">
+                                                Page: <a href={facebookIdentity.url} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted">{facebookIdentity.url}</a>
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground/70">
+                                            On your phone the page opens in the browser; if Facebook offers the app, either works — paste the copied message into the page&apos;s chat.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <div className="flex flex-col gap-3">
+                                        <p className="text-xs text-muted-foreground">
+                                            No message written for this page yet — have the AI draft a short, personalized opener.
+                                        </p>
+                                        <Button
+                                            onClick={() => handleGenerateFbMessage(false)}
+                                            disabled={isGeneratingFb}
+                                            className="w-fit gap-2 rounded-lg bg-[#1877f2] text-white hover:bg-[#166fe0]"
+                                        >
+                                            {isGeneratingFb ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                    Writing…
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Sparkles className="h-4 w-4" />
+                                                    Generate Facebook message
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
 
                     {/* Audit Card — always at the top so the freshest audit is the first thing you see */}
                     {audit && (

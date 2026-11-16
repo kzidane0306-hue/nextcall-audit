@@ -7,6 +7,7 @@ import { applyWebsiteAuditBackfill } from "@/services/websiteAuditBackfill";
 import { auditEngine } from "@/services/auditService";
 import { auditPersistenceService } from "@/services/auditPersistenceService";
 import { aiReportService } from "@/services/aiReportService";
+import { facebookOutreachService } from "@/services/facebookOutreachService";
 import { prospectPersistenceService } from "@/services/prospectPersistenceService";
 import { priorityService } from "@/services/priorityService";
 import { notificationService } from "@/services/notificationService";
@@ -101,6 +102,27 @@ class AuditPipelineService {
         enrichment.preferredEmail = business.enrichment.preferredEmail;
       }
 
+      // The Facebook page read off the About screenshot's address bar is an
+      // operator-verified signal — restore it into the social profiles even
+      // when the website crawl missed it (the crawl builds a fresh
+      // enrichment and would otherwise drop it from the audit's SOCIAL
+      // category).
+      const screenshotFacebookUrl = (business.metadata?.facebookUrl as string | undefined) ?? undefined;
+      if (screenshotFacebookUrl) {
+        const socials = enrichment.socialProfiles ?? [];
+        if (!socials.some((s) => s.platform === "facebook")) {
+          enrichment.socialProfiles = [
+            ...socials,
+            {
+              platform: "facebook",
+              url: screenshotFacebookUrl,
+              sourceUrl: "facebook about screenshot (address bar)",
+              confidence: 100,
+            },
+          ];
+        }
+      }
+
       await persistenceService.updateEnrichmentData(businessId, enrichment);
       enrichedBusiness = { ...business, enrichment };
     } catch (error) {
@@ -180,6 +202,16 @@ class AuditPipelineService {
     );
 
     if (prospect) {
+      // Facebook page → the pipeline's Facebook box and the outreach card.
+      // Reads it off the enriched business so a page discovered by the crawl
+      // (when the screenshot had none) counts too.
+      const facebookPageUrl =
+        (enrichedBusiness.metadata?.facebookUrl as string | undefined) ??
+        enrichedBusiness.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+      if (facebookPageUrl) {
+        await prospectPersistenceService.setFacebookUrl(prospect.id, facebookPageUrl);
+      }
+
       await priorityService.recalculatePriorityForProspect(prospect.id);
 
       await notificationService.notify({
@@ -235,6 +267,9 @@ class AuditPipelineService {
       logger.info(
         `[AuditPipeline] Report for ${business.name} already exists — REPORT job has nothing to do.`
       );
+      // The report is done, but a missing Facebook opener can still be filled
+      // in here (e.g. its generation failed on the first pass).
+      await this.ensureFacebookMessageFor(business, businessId);
       return { generated: false };
     }
 
@@ -272,8 +307,41 @@ class AuditPipelineService {
       dedupeKey: `report-ready:${auditRecord.id}`,
     });
 
+    // The short Facebook opener rides along with the report: one extra small
+    // AI call, and the operator finds the message ready on the prospect.
+    await this.ensureFacebookMessageFor(business, businessId);
+
     logger.info(`[AuditPipeline] AI report written for ${business.name} (REPORT stage).`);
     return { generated: true };
+  }
+
+  /**
+   * Best-effort: generate and store the short Facebook opener for the
+   * business's prospect. A failure never fails the job — the operator can
+   * regenerate it from the prospect page. The page URL may come from the
+   * About screenshot (prospect field / business metadata) or from the
+   * website crawl's social links.
+   */
+  private async ensureFacebookMessageFor(business: Business, businessId: string): Promise<void> {
+    try {
+      const prospect = await prospectPersistenceService.getProspectByBusinessId(businessId);
+      if (!prospect) return;
+
+      const hasFacebookPage =
+        prospect.facebookUrl ||
+        (business.metadata?.facebookUrl as string | undefined) ||
+        business.enrichment?.socialProfiles?.find((s) => s.platform === "facebook")?.url;
+      if (!hasFacebookPage) return;
+
+      const message = await facebookOutreachService.ensureFacebookMessage(prospect.id);
+      if (message) {
+        logger.info(`[AuditPipeline] Facebook message ready for ${business.name}.`);
+      }
+    } catch (error) {
+      logger.warn(
+        `[AuditPipeline] Facebook message generation skipped for ${business.name}: ${getErrorMessage(error)}`
+      );
+    }
   }
 }
 
