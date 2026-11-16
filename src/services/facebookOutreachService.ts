@@ -9,46 +9,57 @@ import { persistenceService } from "@/services/persistenceService";
 import { logger } from "@/lib/logger";
 
 /**
- * The short Facebook opener — a COLD first impression.
+ * The short Facebook opener — a COLD first impression, personalized per
+ * business.
  *
  * The operator has never spoken to this business. The message must read like
- * a polite stranger offering something useful, NOT like a follow-up from
- * someone they already know. So the shape is fixed:
+ * a polite stranger offering something useful, and it must feel written for
+ * THIS business: one concrete, positive, publicly visible detail (their
+ * reviews, a service they list, their hours) proves real research without
+ * ever claiming familiarity or naming problems.
  *
  *   Hey {business}! 👋
  *
  *   I came across your business while researching local {category} companies.
- *   I noticed a few things that might be worth a quick look.
+ *   {One specific positive fact.} I noticed a few small things that might be
+ *   worth a quick look.
  *
- *   I put together a quick audit for {business} — would you be open to seeing it?
+ *   I put together a quick audit for {business} — it walks through what is
+ *   already working and a couple of places where small changes could bring in
+ *   more calls. Would you be open to seeing it?
  *
  * No NextCall pitch, no audit findings, no "your business doesn't have X" —
  * all of that comes later, in the audit email, AFTER they say yes. The AI
- * only softens the phrasing inside the skeleton; anything that breaks the
- * skeleton (a NextCall pitch, a gap claim, familiarity) is rejected and the
- * deterministic template below ships instead — the button never dead-ends.
+ * personalizes inside the skeleton; anything that breaks it (a NextCall
+ * pitch, a gap claim, familiarity) is rejected and the deterministic template
+ * below ships instead — the copy button never dead-ends.
  */
 
 const MessageSchema = z.object({
-  message: z.string().min(30).max(400),
+  message: z.string().min(30).max(650),
 });
 
 const SYSTEM_PROMPT = `
-You write ONE very short first-contact Facebook message for a human consultant to send to a local business's page. This is a COLD first impression: the owner does NOT know the sender and has never been contacted. A stranger is politely offering something useful.
+You write ONE short first-contact Facebook message for a human consultant to send to a local business's page. COLD first impression: the owner does NOT know the sender and has never been contacted. A stranger is politely offering something useful — and the message must feel written specifically for THIS business.
 
-SHAPE — exactly 3 short lines separated by blank lines:
-Line 1: "Hey {business name}! 👋"
-Line 2: ONE flowing sentence or two tiny ones: you came across the business while researching local {category} companies (mention the city if provided), and you noticed a few things that might be worth a quick look. Never say WHAT the things are.
-Line 3: "I put together a quick audit for {business name} — would you be open to seeing it?"
+SHAPE — exactly 3 short paragraphs separated by blank lines:
+Para 1: "Hey {business name}! 👋"
+Para 2 (the personalized hook, 2-4 short sentences):
+  - Open with how you came across the business while researching local {category} companies (mention the city if provided).
+  - Then ONE concrete, POSITIVE detail from the FACTS below that caught your eye — their rating and review count, a service they list, hours they keep, or their website. Phrase it as an outside researcher: "your 776 reviews at 4.7 stars caught my eye", "the fact that you list emergency service stands out". This detail is what makes them curious — pick the strongest one you have.
+  - Close the paragraph softly: "I noticed a few small things that might be worth a quick look." Never say WHAT the things are.
+Para 3: "I put together a quick audit for {business name} — it walks through what is already working and a couple of places where small changes could bring in more calls. Would you be open to seeing it?"
 
 HARD RULES
-- At most 45 words total. Casual, human, plain text.
-- NEVER imply prior contact or familiarity ("your impressive rating", "as you know", "following up").
-- NEVER state audit findings or gaps: no missing booking, no missed calls, no lost customers, no "you don't have X". "A few things worth a quick look" is as far as it goes.
-- NEVER mention NextCall, an AI receptionist, or 24/7 answering. The first message offers the audit only — the details come later, after they reply.
-- The ONLY emoji allowed is the single 👋 in line 1. No links, no hashtags, no signature.
-- Use ONLY the provided business facts (name, category, city). Never invent anything.
-- The business name appears only in lines 1 and 3, spelled exactly as given.
+- 60 to 90 words total. Casual, human, plain text.
+- Use ONLY the FACTS provided. Never invent ratings, services, hours or anything else.
+- NEVER state problems or gaps: no "you don't have", "no online booking", "missed calls", "lost customers", "losing money". Positive observations and the neutral "a few small things" only.
+- NEVER mention NextCall, an AI receptionist, or any product pitch. The first message offers the audit only.
+- NEVER imply prior contact ("as you know", "following up", "your impressive rating as we discussed").
+- NO gushing flattery words ("impressive", "amazing", "incredible") — let the fact speak: "caught my eye", "stands out", "not easy to build".
+- NEVER include email addresses, phone numbers or links in the message.
+- The ONLY emoji allowed is the single 👋 in para 1. No hashtags, no signature.
+- The business name appears only in para 1 and para 3, spelled exactly as given.
 
 Return ONLY valid JSON: { "message": "..." }
 `;
@@ -56,27 +67,45 @@ Return ONLY valid JSON: { "message": "..." }
 function buildUserPrompt(business: Business): string {
   const category = business.categories?.filter(Boolean).join(", ") || "local service";
   const city = business.location?.city?.trim();
-  const cityLine = city ? `- City: ${city}${business.location?.state ? `, ${business.location.state}` : ""}` : "- City: not known — do not mention one";
+  const rating =
+    business.rating != null
+      ? `${business.rating}/5${business.reviewCount ? ` across ${business.reviewCount} reviews` : ""}`
+      : null;
+  const website = business.enrichment?.website?.url || business.website || null;
+  const booking = business.enrichment?.booking;
 
-  return `
-BUSINESS:
-- Name (use exactly): ${business.name}
-- Category: ${category}
-${cityLine}
+  const lines = [
+    "BUSINESS FACTS (public and verified — use ONLY these):",
+    `- Name (use exactly): ${business.name}`,
+    `- Category: ${category}`,
+    city ? `- City: ${city}${business.location?.state ? `, ${business.location.state}` : ""}` : "- City: not known — do not mention one",
+    rating ? `- Rating: ${rating}` : "- Rating: not known — do not mention one",
+    website ? `- Website: ${website}` : "- Website: none found — do not mention one",
+    booking
+      ? `- Online booking on their listing: ${booking.detected ? `yes${booking.systemName ? ` (${booking.systemName})` : ""}` : "not detected"} (do NOT call attention to either way — never claim they lack anything)`
+      : null,
+    business.notes?.trim() ? `- Listing notes (services / hours): """${business.notes.trim().slice(0, 400)}"""` : "- Listing notes: none",
+    "",
+    "TASK: write the message following the 3-paragraph shape exactly, 60-90 words, with the strongest positive fact as the hook.",
+  ];
 
-Write the message now, following the 3-line shape exactly. At most 45 words. Remember: a cold first impression — no audit details, no NextCall, no familiarity.`;
+  return lines.filter(Boolean).join("\n");
 }
 
-/** Anything in here means the model slipped back into "we already know you" mode. */
+/**
+ * Anything in here means the model slipped back into "we already know you"
+ * mode or started pitching. Checked against the message with every occurrence
+ * of the business name removed first — a business literally named "24/7
+ * Mobile Locksmith" must not trip the marketing-claim filters.
+ */
 const BANNED_MESSAGE_PATTERNS: RegExp[] = [
   /nextcall/i,
   /receptionist/i,
-  /\b24\s*\/\s*7\b/i,
   /missed\s+(call|opportunity|customer)/i,
   /lost\s+(customer|money|lead)/i,
   /(doesn'?t|does not|don'?t|do not)\s+(have|see|offer)/i,
   /no online booking/i,
-  /(your|their)\s+(rating|review)s?\s+(is|are)\s+(impressive|great|amazing)/i,
+  /\b(impressive|amazing|incredible|outstanding|blown away)\b/i,
   /as you know/i,
   /following up/i,
 ];
@@ -88,26 +117,38 @@ function validateColdMessage(message: string, business: Business): string | null
   if (!/^hey\b/i.test(text)) return "must open with a Hey greeting";
   if (!/\baudit\b/i.test(text)) return "must offer the audit";
   if (!text.toLowerCase().includes(business.name.toLowerCase())) return "must address the business by name";
+
+  // The business name may legitimately contain phrases like "24/7" that the
+  // marketing filters target — judge the prose, not the name.
+  const prose = text
+    .split(business.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(" ")
+    .replace(new RegExp(business.name.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "gi"), " ");
   for (const pattern of BANNED_MESSAGE_PATTERNS) {
-    if (pattern.test(text)) return `contains banned phrasing (${pattern})`;
+    if (pattern.test(prose)) return `contains banned phrasing (${pattern})`;
   }
+
   const words = text.split(/\s+/).filter(Boolean).length;
-  if (words > 60) return `too long (${words} words)`;
+  if (words > 110) return `too long (${words} words)`;
 
   return null;
 }
 
-/** The deterministic shape the user wrote — used when the AI drifts or fails. */
+/** The deterministic shape — used when the AI drifts or the chain is down. */
 function fallbackFacebookMessage(business: Business): string {
   const name = business.name;
   const city = business.location?.city?.trim();
+  const hook =
+    business.rating != null
+      ? ` Your ${business.rating}${business.reviewCount ? `★ rating across ${business.reviewCount} reviews` : "★ rating"} stood out.`
+      : "";
 
   return [
     `Hey ${name}! 👋`,
     "",
-    `I came across your business while researching local companies${city ? ` in ${city}` : ""}. I noticed a few things on your online presence that might be worth a quick look.`,
+    `I came across your business while researching local companies${city ? ` in ${city}` : ""}.${hook} I noticed a few small things on your online presence that might be worth a quick look.`,
     "",
-    `I put together a quick audit for ${name} — would you be open to seeing it?`,
+    `I put together a quick audit for ${name} — it walks through what is already working and a couple of places where small changes could bring in more calls. Would you be open to seeing it?`,
   ].join("\n");
 }
 
@@ -124,9 +165,10 @@ function tidyMessage(raw: string): string {
 
 export class FacebookOutreachService {
   /**
-   * Writes the short page message. Two AI attempts inside the strict skeleton;
-   * if both drift (or the chain is down), the deterministic template ships —
-   * this message is too important to leave the operator with nothing to copy.
+   * Writes the personalized page message. Two AI attempts inside the strict
+   * skeleton; if both drift (or the chain is down), the deterministic
+   * template ships — this message is too important to leave the operator
+   * with nothing to copy.
    */
   async generateFacebookMessage(business: Business): Promise<string> {
     let lastProblem = "the AI chain did not answer";
@@ -137,7 +179,7 @@ export class FacebookOutreachService {
           system: SYSTEM_PROMPT,
           user: buildUserPrompt(business),
           temperature: 0.6,
-          maxOutputTokens: 400,
+          maxOutputTokens: 600,
           json: true,
           model: AI_CHAINS.main,
           timeoutMs: 30_000,

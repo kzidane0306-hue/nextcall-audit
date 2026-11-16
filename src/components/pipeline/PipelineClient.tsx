@@ -12,7 +12,8 @@ import {
     setLastActiveFilter,
 } from "./pipelineCache";
 import { Card, CardContent } from "@/components/ui/card";
-import { Trash2, Inbox } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Trash2, Inbox, Search, X } from "lucide-react";
 import { FacebookIcon } from "@/components/ui/facebook-icon";
 import { logger } from "@/lib/logger";
 import { hasBeenEmailed, isProspectUnread } from "@/lib/pipelineReadState";
@@ -111,6 +112,45 @@ export default function PipelineClient() {
     const [truncated, setTruncated] = useState<boolean>(false);
     const latestRequestId = useRef(0);
 
+    // Name / email search over the whole pipeline. Debounced; results bypass
+    // the active box entirely — the operator types a name or an email and
+    // gets the audit back from anywhere in the list.
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<EnrichedProspect[] | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
+    const searchActive = searchQuery.trim().length >= 2;
+
+    useEffect(() => {
+        const query = searchQuery.trim();
+        // All state changes ride the timer: a synchronous setState in the
+        // effect body cascades renders (react-hooks/set-state-in-effect).
+        // Clearing the search restores the box list on the next tick.
+        const timer = setTimeout(() => {
+            if (query.length < 2) {
+                setSearchResults(null);
+                return;
+            }
+            setIsSearching(true);
+            fetch(`/api/prospects?q=${encodeURIComponent(query)}&limit=200`)
+                .then((response) => {
+                    if (!response.ok) throw new Error("Search failed");
+                    return response.json();
+                })
+                .then((data) => {
+                    setSearchResults(data.prospects ?? []);
+                })
+                .catch((err: unknown) => {
+                    logger.error("[PipelineClient] Search failed:", getErrorMessage(err));
+                    toast.error("Search failed", getErrorMessage(err));
+                    setSearchResults([]);
+                })
+                .finally(() => {
+                    setIsSearching(false);
+                });
+        }, query.length < 2 ? 0 : 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery, toast]);
+
     useEffect(() => {
         setLastActiveFilter(activeFilter);
         const cacheKey = activeFilter;
@@ -197,11 +237,35 @@ export default function PipelineClient() {
 
     // Every box is filtered server-side now, so the list is exactly what the
     // API returned for the active box — no second filtering pass that could
-    // disagree with the count shown on the tab.
-    const displayedProspects = prospects;
+    // disagree with the count shown on the tab. While a search is active the
+    // search results replace the box list entirely.
+    const displayedProspects = searchActive ? searchResults ?? [] : prospects;
 
     return (
         <div className="flex flex-col gap-4">
+            {/* Search across the whole pipeline by business name or email */}
+            <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by business name or email…"
+                    aria-label="Search prospects by business name or email"
+                    className="h-10 rounded-xl border-border bg-white pr-9 pl-9 text-sm shadow-sm"
+                />
+                {searchQuery && (
+                    <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        aria-label="Clear search"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                )}
+            </div>
+
             <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap gap-2">
                     {PIPELINE_VIEWS.map((view) => {
@@ -227,8 +291,10 @@ export default function PipelineClient() {
                     })}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                    {PIPELINE_VIEWS.find((view) => view.id === activeFilter)?.hint ?? ""}
-                    {truncated && (
+                    {searchActive
+                        ? `${isSearching ? "Searching…" : `${displayedProspects.length} result${displayedProspects.length === 1 ? "" : "s"}`} for "${searchQuery.trim()}" — across the whole pipeline, every box.`
+                        : PIPELINE_VIEWS.find((view) => view.id === activeFilter)?.hint ?? ""}
+                    {!searchActive && truncated && (
                         <span className="text-indigo-600">
                             {" "}showing the first {displayedProspects.length} of {counts[activeFilter] ?? 0} — narrow it with another box.
                         </span>
@@ -239,7 +305,7 @@ export default function PipelineClient() {
             <div className="flex flex-col gap-3">
                 {isLoading && <p className="text-sm text-gray-500">Loading pipeline...</p>}
 
-                {!isLoading && displayedProspects.length === 0 && (
+                {!isLoading && !searchActive && displayedProspects.length === 0 && (
                     <Card>
                         <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
                             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-indigo-50 text-indigo-500">
@@ -259,6 +325,19 @@ export default function PipelineClient() {
                                 : activeFilter === "EMAILED"
                                 ? "No emails sent yet. Open a prospect and send the initial outreach email."
                                 : "No prospects found. Discover businesses or load screenshots to fill the pipeline."}
+                            </p>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {searchActive && !isSearching && displayedProspects.length === 0 && (
+                    <Card>
+                        <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-indigo-50 text-indigo-500">
+                                <Search className="h-5 w-5" />
+                            </span>
+                            <p className="max-w-md text-sm text-muted-foreground">
+                                No audits match &ldquo;{searchQuery.trim()}&rdquo; — try the business name or the email address the audit was sent to.
                             </p>
                         </CardContent>
                     </Card>

@@ -172,11 +172,28 @@ export async function GET(request: NextRequest) {
 
     const status = searchParams.get("status") as PipelineStatus | null;
     const view = (searchParams.get("view") ?? status ?? "ALL").toUpperCase();
+    const q = searchParams.get("q")?.trim() ?? "";
 
     const requested = Number(searchParams.get("limit") ?? DEFAULT_LIMIT);
     const limit = Number.isFinite(requested)
       ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(requested)))
       : DEFAULT_LIMIT;
+
+    // Name / email search across the WHOLE pipeline, regardless of the
+    // active box — the operator types a business name or an email and gets
+    // the audit back.
+    if (q.length >= 2) {
+      const rows = await searchPage(q, limit);
+      const enriched = await enrich(rows);
+      return NextResponse.json({
+        prospects: enriched,
+        view: "SEARCH",
+        q,
+        limit,
+        total: enriched.length,
+        truncated: false,
+      });
+    }
 
     // The page and the box counts do not depend on each other.
     const [page, counts] = await Promise.all([loadPage(view, limit), loadCounts()]);
@@ -195,6 +212,79 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ error: "Failed to fetch prospects" }, { status: 500 });
   }
+}
+
+/** Escapes user input so it can be embedded in a $regex filter verbatim. */
+function escapeRegExp(q: string): string {
+  return q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Name / email search over the whole pipeline: matches business names and
+ * any discovered email on the businesses collection, plus the prospect's own
+ * contact email and snapshot email/name fields, then loads those prospects.
+ * If the Data API rejects a regex filter, falls back to scanning the newest
+ * rows in JavaScript — a degraded but working search.
+ */
+async function searchPage(q: string, limit: number): Promise<ProspectRow[]> {
+  const rx = { $regex: escapeRegExp(q), $options: "i" };
+
+  try {
+    const businesses = await getBusinessesCollection();
+    const bizDocs = (await businesses
+      .find(
+        {
+          $or: [
+            { name: rx },
+            { "enrichment.preferredEmail": rx },
+            { "enrichment.emails.address": rx },
+          ],
+        },
+        { limit: 100, projection: { id: true } }
+      )
+      .toArray()) as unknown as { id?: string }[];
+
+    const ids = bizDocs.map((doc) => doc.id).filter(Boolean) as string[];
+
+    const or: Record<string, unknown>[] = [
+      { contactEmail: rx },
+      { "businessSnapshot.preferredEmail": rx },
+      { "businessSnapshot.emails": rx },
+      { "businessSnapshot.name": rx },
+    ];
+    for (const group of chunk(ids)) or.push({ businessId: { $in: group } });
+
+    const collection = await getProspectsCollection();
+    return (await collection
+      .find({ $or: or }, { sort: { createdAt: -1 }, limit })
+      .toArray()) as unknown as ProspectRow[];
+  } catch (error) {
+    logger.warn(
+      `[API /prospects] Regex search unavailable, scanning recent rows instead: ${getErrorMessage(error)}`
+    );
+  }
+
+  // Degraded path: scan the newest rows and match in JavaScript.
+  const collection = await getProspectsCollection();
+  const rows = (await collection
+    .find({}, { sort: { createdAt: -1 }, limit: 200 })
+    .toArray()) as unknown as ProspectRow[];
+  const needle = q.toLowerCase();
+  return rows.filter((row) => {
+    const snap = (row.businessSnapshot ?? {}) as {
+      name?: string;
+      preferredEmail?: string;
+      emails?: string[];
+    };
+    return [
+      row.contactEmail,
+      snap.name,
+      snap.preferredEmail,
+      ...(Array.isArray(snap.emails) ? snap.emails : []),
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(needle));
+  });
 }
 
 async function loadPage(view: string, limit: number): Promise<ProspectRow[]> {
