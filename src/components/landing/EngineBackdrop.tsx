@@ -23,11 +23,11 @@ const BLOCK = { x: 430, y: 170, w: 500, h: 330 };
 const BORE = { top: 190, bottom: 400, halfWidth: 38 };
 
 /** Ink used across the drawing. Restrained on purpose. */
-const LINE = "#2b3948";
-const LINE_SOFT = "#223040";
-const HAIR = "#1b2530";
-const AMBER = "#f5a524";
-const GREEN = "#2fd583";
+const LINE = "#b9c3d2";
+const LINE_SOFT = "#cdd5e0";
+const HAIR = "#e2e7ee";
+const AMBER = "#d97706";
+const GREEN = "#16a34a";
 
 /**
  * Trapezoid teeth around a pitch circle. Drawn as one path so the gear reads as
@@ -97,7 +97,7 @@ function Gear({
         <circle cx={cx} cy={cy} r={radius * 0.13} fill="none" stroke={LINE_SOFT} strokeWidth="1" />
       </g>
       {/* hub axle stays still while the gear turns */}
-      <circle cx={cx} cy={cy} r={radius * 0.09} fill={HAIR} stroke={LINE} strokeWidth="1" />
+      <circle cx={cx} cy={cy} r={radius * 0.09} fill="#c3ccd8" stroke={LINE} strokeWidth="1" />
       {label && (
         <text x={cx} y={cy + radius + 22} textAnchor="middle" className="mc-eng-note">
           {label}
@@ -132,7 +132,7 @@ function Gauge({ cx, cy, radius }: { cx: number; cy: number; radius: number }) {
       <path
         d={`M ${cx + Math.sin(-0.35) * radius * 0.7} ${cy - Math.cos(-0.35) * radius * 0.7} A ${radius * 0.7} ${radius * 0.7} 0 0 1 ${cx + Math.sin(0.35) * radius * 0.7} ${cy - Math.cos(0.35) * radius * 0.7}`}
         fill="none"
-        stroke="rgba(255,95,86,0.55)"
+        stroke="rgba(220,38,38,0.45)"
         strokeWidth="2.5"
       />
       {ticks}
@@ -146,7 +146,7 @@ function Gauge({ cx, cy, radius }: { cx: number; cy: number; radius: number }) {
         className="mc-eng-needle"
         style={{ transformOrigin: `${cx}px ${cy}px` }}
       />
-      <circle cx={cx} cy={cy} r={3.5} fill="#0c1116" stroke={AMBER} strokeWidth="1.5" />
+      <circle cx={cx} cy={cy} r={3.5} fill="#ffffff" stroke={AMBER} strokeWidth="1.5" />
     </g>
   );
 }
@@ -198,21 +198,21 @@ export default function EngineBackdrop() {
       >
         <defs>
           <linearGradient id="eng-steel" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1b2634" />
-            <stop offset="55%" stopColor="#111922" />
-            <stop offset="100%" stopColor="#0b1016" />
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="55%" stopColor="#f2f4f8" />
+            <stop offset="100%" stopColor="#e3e8ef" />
           </linearGradient>
           <linearGradient id="eng-amber" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(245,165,36,0.5)" />
-            <stop offset="100%" stopColor="rgba(245,165,36,0.08)" />
+            <stop offset="0%" stopColor="rgba(217,119,6,0.45)" />
+            <stop offset="100%" stopColor="rgba(217,119,6,0.06)" />
           </linearGradient>
           <linearGradient id="eng-glow" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(245,165,36,0.16)" />
-            <stop offset="100%" stopColor="rgba(245,165,36,0)" />
+            <stop offset="0%" stopColor="rgba(217,119,6,0.14)" />
+            <stop offset="100%" stopColor="rgba(217,119,6,0)" />
           </linearGradient>
           <radialGradient id="eng-heat" cx="50%" cy="30%" r="62%">
-            <stop offset="0%" stopColor="rgba(245,165,36,0.1)" />
-            <stop offset="100%" stopColor="rgba(245,165,36,0)" />
+            <stop offset="0%" stopColor="rgba(217,119,6,0.08)" />
+            <stop offset="100%" stopColor="rgba(217,119,6,0)" />
           </radialGradient>
         </defs>
 
@@ -258,7 +258,7 @@ export default function EngineBackdrop() {
         <rect x={BLOCK.x - 12} y={BLOCK.y - 16} width={BLOCK.w + 24} height="16" rx="3" fill="url(#eng-glow)" stroke={LINE} strokeWidth="1.25" />
         {Array.from({ length: 9 }, (_, i) => (
           <g key={`bolt-${i}`}>
-            <circle cx={BLOCK.x + 8 + i * ((BLOCK.w - 16) / 8)} cy={BLOCK.y - 8} r="3.4" fill="#0b1016" stroke={LINE_SOFT} strokeWidth="1" />
+            <circle cx={BLOCK.x + 8 + i * ((BLOCK.w - 16) / 8)} cy={BLOCK.y - 8} r="3.4" fill="#dfe4ec" stroke={LINE_SOFT} strokeWidth="1" />
             <line
               x1={BLOCK.x + 4 + i * ((BLOCK.w - 16) / 8)}
               y1={BLOCK.y - 8}
@@ -305,7 +305,7 @@ export default function EngineBackdrop() {
               <rect x={cx - 30} y="205" width="60" height="11" fill="none" stroke={AMBER} strokeWidth="0.9" opacity="0.75" />
               <rect x={cx - 30} y="218" width="60" height="5" fill="none" stroke={AMBER} strokeWidth="0.9" opacity="0.6" />
               <rect x={cx - 30} y="226" width="60" height="5" fill="none" stroke={AMBER} strokeWidth="0.9" opacity="0.45" />
-              <circle cx={cx} cy="250" r="7" fill="#0b1016" stroke={AMBER} strokeWidth="1.5" />
+              <circle cx={cx} cy="250" r="7" fill="#dfe4ec" stroke={AMBER} strokeWidth="1.5" />
             </g>
           </g>
         ))}
@@ -341,7 +341,7 @@ export default function EngineBackdrop() {
               strokeWidth="1.25"
             />
             <circle cx={cx} cy={CRANK_Y} r="26" fill="none" stroke={LINE} strokeWidth="1" />
-            <circle cx={cx} cy={CRANK_Y - 20} r="8" fill="#0b1016" stroke={AMBER} strokeWidth="1.5" />
+            <circle cx={cx} cy={CRANK_Y - 20} r="8" fill="#dfe4ec" stroke={AMBER} strokeWidth="1.5" />
             {/* main journal stays put while the throw orbits */}
             <circle cx={cx} cy={CRANK_Y} r="4" fill="none" stroke={LINE_SOFT} strokeWidth="1" />
           </g>
@@ -366,9 +366,9 @@ export default function EngineBackdrop() {
               <circle cx={beltX} cy={bottomY} r={bottomR} fill="url(#eng-steel)" stroke={LINE} strokeWidth="1.5" />
               <circle cx={beltX} cy={bottomY} r={bottomR - 8} fill="none" stroke={HAIR} strokeWidth="1" />
               <path d={loop} fill="none" stroke={LINE} strokeWidth="5" />
-              <path d={loop} fill="none" stroke="#8fa1b3" strokeWidth="1.75" strokeDasharray="10 20" className="mc-eng-belt" opacity="0.8" />
-              <circle cx={beltX} cy={topY} r="6" fill="#0b1016" stroke={LINE_SOFT} strokeWidth="1" />
-              <circle cx={beltX} cy={bottomY} r="5" fill="#0b1016" stroke={LINE_SOFT} strokeWidth="1" />
+              <path d={loop} fill="none" stroke="#7c8798" strokeWidth="1.75" strokeDasharray="10 20" className="mc-eng-belt" opacity="0.8" />
+              <circle cx={beltX} cy={topY} r="6" fill="#dfe4ec" stroke={LINE_SOFT} strokeWidth="1" />
+              <circle cx={beltX} cy={bottomY} r="5" fill="#dfe4ec" stroke={LINE_SOFT} strokeWidth="1" />
             </g>
           );
         })()}

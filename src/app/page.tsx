@@ -52,7 +52,7 @@ const CAPABILITIES = [
 
 export default function Home() {
   return (
-    <div className="mc-scope relative flex min-h-screen flex-col overflow-hidden">
+    <div className="nc-scope relative flex min-h-screen flex-col overflow-hidden">
       {/*
         The engine sits BEHIND the hero, on the right: the text column is on the
         left so the drawing is not buried under the title, the rule, the buttons
@@ -64,7 +64,7 @@ export default function Home() {
       </div>
 
       {/* top rail */}
-      <header className="relative z-10 flex items-center justify-between border-b border-[#1b2530] bg-[#07090c]/70 px-5 py-3 backdrop-blur-sm">
+      <header className="relative z-10 flex items-center justify-between border-b border-[#e4e7ec] bg-white/70 px-5 py-3 backdrop-blur-sm">
         <span className="flex items-center gap-2">
           <span className="mc-led mc-led-green" />
           <span className="mc-label">system online</span>
@@ -77,24 +77,24 @@ export default function Home() {
         {/* ---------------- hero ---------------- */}
         <section className="relative mx-auto grid w-full max-w-6xl items-center">
           {/* scrim: keeps the copy readable where it overlaps the drawing */}
-          <div className="pointer-events-none absolute -inset-x-8 -inset-y-10 hidden bg-gradient-to-r from-[#07090c] via-[#07090c]/85 to-transparent lg:block" />
+          <div className="pointer-events-none absolute -inset-x-8 -inset-y-10 hidden bg-gradient-to-r from-[#f6f7f9] via-[#f6f7f9]/85 to-transparent lg:block" />
 
           <div className="relative flex flex-col items-start gap-5 lg:max-w-xl">
             <p className="mc-label">single operator · runs unattended</p>
 
-            <h1 className="text-[2.4rem] font-semibold leading-[1.04] tracking-[0.14em] text-[#dbe4ec] sm:text-5xl lg:text-[3.4rem]">
+            <h1 className="text-[2.4rem] font-bold leading-[1.04] tracking-[0.14em] text-[#1a2230] sm:text-5xl lg:text-[3.4rem]">
               NEXTCALL
               <br />
-              <span className="text-[#f5a524]">PROSPECTOR</span>
+              <span className="nc-gradient-text">PROSPECTOR</span>
             </h1>
 
             <div className="flex w-full max-w-sm items-center gap-3">
-              <span className="h-px flex-1 bg-gradient-to-r from-[#2b3948] to-transparent" />
-              <span className="h-1.5 w-1.5 rotate-45 bg-[#f5a524]" />
-              <span className="h-px w-16 bg-[#2b3948]" />
+              <span className="h-px flex-1 bg-gradient-to-r from-[#cdd4dd] to-transparent" />
+              <span className="h-1.5 w-1.5 rotate-45 bg-indigo-600" />
+              <span className="h-px w-16 bg-[#cdd4dd]" />
             </div>
 
-            <p className="max-w-lg text-[13px] leading-relaxed text-[#8fa1b3]">
+            <p className="max-w-lg text-[13px] leading-relaxed text-[#66707d]">
               Screenshots in. The machine reads them, crawls the website, scores an audit, writes the
               report and emails it — then watches for the opens.
             </p>
@@ -102,24 +102,24 @@ export default function Home() {
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <Link
                 href="/dashboard"
-                className="border border-[#f5a524] bg-[#f5a524]/10 px-6 py-3 text-[11px] uppercase tracking-[0.2em] text-[#f7c469] transition-colors hover:bg-[#f5a524]/20"
+                className="nc-gradient-primary rounded-lg px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-white shadow-md transition-all hover:brightness-110 hover:shadow-lg"
               >
                 open the console
               </Link>
               <Link
                 href="/dashboard/screenshot"
-                className="border border-[#2b3948] bg-[#0c1116]/80 px-6 py-3 text-[11px] uppercase tracking-[0.2em] text-[#8fa1b3] transition-colors hover:border-[#f5a524]/40 hover:text-[#c8d3dd]"
+                className="rounded-lg border border-[#cdd4dd] bg-white px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#66707d] shadow-sm transition-all hover:border-[#4f46e5]/40 hover:text-[#1a2230] hover:shadow-md"
               >
                 load screenshots
               </Link>
             </div>
 
             {/* sheet data */}
-            <dl className="mt-4 grid w-full max-w-lg grid-cols-2 gap-px border border-[#1b2530] bg-[#1b2530] sm:grid-cols-4">
+            <dl className="mt-4 grid w-full max-w-lg grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#e4e7ec] bg-[#e4e7ec] shadow-sm sm:grid-cols-4">
               {SPEC.map((item) => (
-                <div key={item.label} className="flex flex-col gap-1 bg-[#0a0e13]/90 px-3 py-2.5">
+                <div key={item.label} className="flex flex-col gap-1 bg-white px-3 py-2.5">
                   <dt className="mc-label text-[9px]">{item.label}</dt>
-                  <dd className="text-[13px] tabular-nums text-[#c8d3dd]">{item.value}</dd>
+                  <dd className="text-[13px] font-semibold tabular-nums text-[#1a2230]">{item.value}</dd>
                 </div>
               ))}
             </dl>
@@ -129,13 +129,13 @@ export default function Home() {
         {/* ---------------- stage rail ---------------- */}
         <section className="mx-auto w-full max-w-6xl">
           <p className="mc-label mb-3">the run, end to end</p>
-          <ol className="grid grid-cols-2 gap-px border border-[#1b2530] bg-[#1b2530] sm:grid-cols-4 lg:grid-cols-8">
+          <ol className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#e4e7ec] bg-[#e4e7ec] shadow-sm sm:grid-cols-4 lg:grid-cols-8">
             {STAGES.map((stage, index) => (
-              <li key={stage} className="flex flex-col gap-1.5 bg-[#0a0e13]/90 px-3 py-3">
-                <span className="text-[9px] tabular-nums text-[#f5a524]">
+              <li key={stage} className="flex flex-col gap-1.5 bg-white px-3 py-3 transition-colors hover:bg-indigo-50/40">
+                <span className="text-[9px] font-semibold tabular-nums text-[#d97706]">
                   {String(index + 1).padStart(2, "0")}
                 </span>
-                <span className="text-[10px] uppercase leading-tight tracking-[0.1em] text-[#8fa1b3]">
+                <span className="text-[10px] uppercase leading-tight tracking-[0.1em] text-[#66707d]">
                   {stage}
                 </span>
               </li>
@@ -147,13 +147,13 @@ export default function Home() {
         <div className="mx-auto grid w-full max-w-6xl gap-4 md:grid-cols-2">
           {CAPABILITIES.map((item) => (
             <ConsolePanel key={item.title} title={item.title}>
-              <p className="px-4 py-4 text-[12px] leading-relaxed text-[#8fa1b3]">{item.body}</p>
+              <p className="px-4 py-4 text-[12px] leading-relaxed text-[#66707d]">{item.body}</p>
             </ConsolePanel>
           ))}
         </div>
       </main>
 
-      <footer className="relative z-10 flex flex-wrap items-center justify-between gap-2 border-t border-[#1b2530] bg-[#07090c]/70 px-5 py-3 backdrop-blur-sm">
+      <footer className="relative z-10 flex flex-wrap items-center justify-between gap-2 border-t border-[#e4e7ec] bg-white/70 px-5 py-3 backdrop-blur-sm">
         <span className="mc-label">every stage above is real — fed by the workers</span>
         <span className="mc-label">not a public site</span>
       </footer>

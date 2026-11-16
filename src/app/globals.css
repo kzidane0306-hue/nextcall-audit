@@ -569,9 +569,9 @@
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  fill: #4b5a68;
+  fill: #8b95a3;
 }
-.mc-eng-note-key { fill: #8fa1b3; }
+.mc-eng-note-key { fill: #4f46e5; }
 
 /* Fluid and belt travel share one dash-flow timing. */
 @keyframes mc-eng-rail {
