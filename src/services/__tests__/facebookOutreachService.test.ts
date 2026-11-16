@@ -68,7 +68,7 @@ describe("facebookOutreachService.ensureFacebookMessage", () => {
   it("keeps a good cold draft and saves it on the prospect", async () => {
     mocks.generateLLMResponse.mockResolvedValue(
       llmReply(
-        "Hey Acme Plumbing! 👋\n\nI came across your business while researching local plumbing companies in Sandy. I noticed a few things that might be worth a quick look.\n\nI put together a quick audit for Acme Plumbing — would you be open to seeing it?"
+        "Hey Acme Plumbing! 👋\n\nI came across your business while researching local plumbing companies in Sandy. I noticed a few things that might be worth a quick look.\n\nI put together a quick audit for Acme Plumbing. Would you be open to seeing it?"
       )
     );
 
@@ -113,7 +113,7 @@ describe("facebookOutreachService.ensureFacebookMessage", () => {
 
     mocks.generateLLMResponse.mockResolvedValue(
       llmReply(
-        "Hey 24/7 Mobile Locksmith - Tampa! 👋\n\nI came across your business while researching local locksmith companies in Tampa. Your 776 reviews at 4.7 stars caught my eye — that is not easy to build. I noticed a few small things that might be worth a quick look.\n\nI put together a quick audit for 24/7 Mobile Locksmith - Tampa — would you be open to seeing it?"
+        "Hey 24/7 Mobile Locksmith - Tampa! 👋\n\nI came across your business while researching local locksmith companies in Tampa. Your 776 reviews at 4.7 stars caught my eye, which is not easy to build. I noticed a few small things that might be worth a quick look.\n\nI put together a quick audit for 24/7 Mobile Locksmith - Tampa. Would you be open to seeing it?"
       )
     );
 
@@ -142,6 +142,22 @@ describe("facebookOutreachService.ensureFacebookMessage", () => {
     expect(mocks.updateFacebookMessage).not.toHaveBeenCalled();
   });
 
+  it("rejects a draft that uses dashes and ships the dash-free template", async () => {
+    mocks.generateLLMResponse.mockResolvedValue(
+      llmReply(
+        "Hey Acme Plumbing! 👋\n\nI came across your business while researching local plumbing companies in Sandy. Your 4.7 rating across 200 reviews caught my eye.\n\nI put together a quick audit for Acme Plumbing — would you be open to seeing it?"
+      )
+    );
+
+    const message = await facebookOutreachService.ensureFacebookMessage("p1");
+
+    expect(message).not.toMatch(/—/);
+    expect(message).not.toMatch(/\s-\s/);
+    expect(message).toMatch(/^Hey Acme Plumbing! 👋/);
+    expect(message).toMatch(/audit for Acme Plumbing/);
+    expect(mocks.updateFacebookMessage).toHaveBeenCalledWith("p1", expect.any(String));
+  });
+
   it("reuses the stored message and only rewrites it when force is set", async () => {
     const stored = (await import("@/types"), {
       ...prospect,
@@ -155,7 +171,7 @@ describe("facebookOutreachService.ensureFacebookMessage", () => {
 
     mocks.generateLLMResponse.mockResolvedValue(
       llmReply(
-        "Hey Acme Plumbing! 👋\n\nI came across your business while researching local plumbing companies in Sandy. A few things on your online presence might be worth a quick look.\n\nI put together a quick audit for Acme Plumbing — would you be open to seeing it?"
+        "Hey Acme Plumbing! 👋\n\nI came across your business while researching local plumbing companies in Sandy. A few things on your online presence might be worth a quick look.\n\nI put together a quick audit for Acme Plumbing. Would you be open to seeing it?"
       )
     );
 

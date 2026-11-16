@@ -9,26 +9,27 @@
  */
 
 const SYSTEM_PROMPT = `
-You write ONE short first-contact Facebook message for a human consultant to send to a local business's page. COLD first impression: the owner does NOT know the sender and has never been contacted. A stranger is politely offering something useful — and the message must feel written specifically for THIS business.
+You write ONE short first-contact Facebook message for a human consultant to send to a local business's page. COLD first impression: the owner does NOT know the sender and has never been contacted. A stranger politely offering something useful — and it must read as if it was hand-written for THIS business.
 
-SHAPE — exactly 3 short paragraphs separated by blank lines:
-Para 1: "Hey {business name}! 👋"
-Para 2 (the personalized hook, 2-4 short sentences):
-  - Open with how you came across the business while researching local {category} companies (mention the city if provided).
-  - Then ONE concrete, POSITIVE detail from the FACTS below that caught your eye — their rating and review count, a service they list, hours they keep, or their website. Phrase it as an outside researcher: "your 776 reviews at 4.7 stars caught my eye", "the fact that you list emergency service stands out". This detail is what makes them curious — pick the strongest one you have.
-  - Close the paragraph softly: "I noticed a few small things that might be worth a quick look." Never say WHAT the things are.
-Para 3: "I put together a quick audit for {business name} — it walks through what is already working and a couple of places where small changes could bring in more calls. Would you be open to seeing it?"
+WHAT THE MESSAGE MUST DO (the beats, in a natural order):
+1. A casual greeting that includes the business name and a single 👋 ("Hey {name}! 👋").
+2. In your own words: you came across them while researching local {category} companies (mention the city when known).
+3. Weave in ONE concrete, POSITIVE fact from the FACTS that genuinely stands out for THIS business — their review count at their rating, a service they list, the hours they keep, their website. Phrase it like a researcher sharing an observation ("caught my eye", "stands out", "not easy to build"). If several facts are available, pick the most distinctive one and write the sentence around it.
+4. A soft bridge: you noticed a few small things that might be worth a quick look. Never say WHAT they are.
+5. The offer: you put together a quick audit for {name} that walks through what is already working and where small changes could bring in more calls, ending with a soft permission question ("Would you be open to seeing it?" or something similar in your own words).
+
+MAKE IT UNIQUE
+- Write like a person typing about THIS business, not like a form being filled in. Vary the sentence lengths, the order and the wording. Two different businesses must never produce the same sentences with only the names swapped: the hook, the phrasing and the flow have to come from THIS business's own facts.
 
 HARD RULES
-- 60 to 90 words total. Casual, human, plain text.
+- 60 to 90 words, plain text, in 2 to 3 short paragraphs separated by blank lines.
+- NEVER use dashes or hyphens of your own (no "—", no "–", no "-"). Join ideas with commas or start a new sentence instead. If the business name itself contains a hyphen, keep it — it is the name.
 - Use ONLY the FACTS provided. Never invent ratings, services, hours or anything else.
 - NEVER state problems or gaps: no "you don't have", "no online booking", "missed calls", "lost customers", "losing money". Positive observations and the neutral "a few small things" only.
 - NEVER mention NextCall, an AI receptionist, or any product pitch. The first message offers the audit only.
-- NEVER imply prior contact ("as you know", "following up", "your impressive rating as we discussed").
-- NO gushing flattery words ("impressive", "amazing", "incredible") — let the fact speak: "caught my eye", "stands out", "not easy to build".
-- NEVER include email addresses, phone numbers or links in the message.
-- The ONLY emoji allowed is the single 👋 in para 1. No hashtags, no signature.
-- The business name appears only in para 1 and para 3, spelled exactly as given.
+- NEVER imply prior contact ("as you know", "following up"). NO gushing flattery ("impressive", "amazing", "incredible") — let the fact speak: "caught my eye", "stands out", "not easy to build".
+- The ONLY emoji allowed is the single 👋 with the greeting. No links, hashtags, signature, email addresses or phone numbers.
+- The business name is spelled exactly as given and appears in the greeting and in the offer.
 
 Return ONLY valid JSON: { "message": "..." }
 `;
@@ -60,7 +61,7 @@ function buildUserPrompt(b) {
       : null,
     b.notes?.trim() ? `- Listing notes (services / hours): """${b.notes.trim().slice(0, 400)}"""` : "- Listing notes: none",
     "",
-    "TASK: write the message following the 3-paragraph shape exactly, 60-90 words, with the strongest positive fact as the hook.",
+    "TASK: write the message following the beats exactly, 60-90 words, with the strongest positive fact as the hook, written fresh for THIS business.",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -75,21 +76,23 @@ const BANNED_MESSAGE_PATTERNS = [
   /\b(impressive|amazing|incredible|outstanding|blown away)\b/i,
   /as you know/i,
   /following up/i,
+  /[\u2014\u2013]/,
+  /\s-\s/,
 ];
 
 function validateColdMessage(message, b) {
   const text = message.trim();
-  if (!/^hey\b/i.test(text)) return "must open with a Hey greeting";
+  if (!/^(hey|hi|hello)\b/i.test(text)) return "must open with a casual greeting";
   if (!/\baudit\b/i.test(text)) return "must offer the audit";
   if (!text.toLowerCase().includes(b.name.toLowerCase())) return "must address the business by name";
 
   const escapedName = b.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const prose = text
-    .split(escapedName)
+    .split(new RegExp(escapedName, "i"))
     .join(" ")
     .replace(new RegExp(b.name.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "gi"), " ");
   for (const pattern of BANNED_MESSAGE_PATTERNS) {
-    if (pattern.test(prose)) return `contains banned phrasing (${pattern})`;
+    if (pattern.test(prose)) return `contains banned phrasing or a dash (${pattern})`;
   }
   const words = text.split(/\s+/).filter(Boolean).length;
   if (words > 110) return `too long (${words} words)`;
@@ -120,7 +123,7 @@ async function callOpenAICompatible(label, baseUrl, access, model, system, user)
         { role: "user", content: user },
       ],
       max_tokens: 600,
-      temperature: 0.6,
+      temperature: 0.75,
       stream: false,
     }),
   });
@@ -143,14 +146,14 @@ function fallbackFacebookMessage(b) {
   const name = b.name;
   const city = b.location?.city?.trim();
   const hook = b.rating != null
-    ? ` Your ${b.rating}${b.reviewCount ? `★ rating across ${b.reviewCount} reviews` : "★ rating"} stood out.`
+    ? ` Your ${b.rating}${b.reviewCount ? ` star rating across ${b.reviewCount} reviews` : " star rating"} stood out.`
     : "";
   return [
     `Hey ${name}! 👋`,
     "",
     `I came across your business while researching local companies${city ? ` in ${city}` : ""}.${hook} I noticed a few small things on your online presence that might be worth a quick look.`,
     "",
-    `I put together a quick audit for ${name} — it walks through what is already working and a couple of places where small changes could bring in more calls. Would you be open to seeing it?`,
+    `I put together a quick audit for ${name}. It walks through what is already working and a couple of places where small changes could bring in more calls. Would you be open to seeing it?`,
   ].join("\n");
 }
 
