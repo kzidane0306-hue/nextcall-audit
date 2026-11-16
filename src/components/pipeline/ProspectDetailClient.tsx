@@ -11,7 +11,7 @@ import { logger } from "@/lib/logger";
 import { hasBeenEmailed } from "@/lib/pipelineReadState";
 import { normalizeExternalUrl, isValidExternalUrl } from "@/lib/externalUrl";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Copy, Check, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, ExternalLink, Copy, Check, Loader2, Sparkles, Download } from "lucide-react";
 import { FacebookIcon } from "@/components/ui/facebook-icon";
 import { normalizeFacebookPageUrl, buildMessengerUrl, buildBrowserFacebookUrl } from "@/lib/facebookUrl";
 
@@ -64,6 +64,7 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
     const [copied, setCopied] = useState(false);
     const [isGeneratingFb, setIsGeneratingFb] = useState(false);
     const [isMarkingFb, setIsMarkingFb] = useState(false);
+    const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
     // Pure fetch without setState, so the mount effect can call it without
     // triggering react-hooks/set-state-in-effect (state updates happen in
@@ -448,6 +449,40 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
         }
     };
 
+    // Downloads the stored audit as a PDF: the server renders the saved audit
+    // + AI report on demand, so every audit that has its report ready can be
+    // taken offline in one click.
+    const handleDownloadAuditPdf = async () => {
+        if (!data) return;
+        setIsDownloadingPdf(true);
+        try {
+            const res = await fetch("/api/reports/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ businessId: data.prospect.businessId }),
+            });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({ error: "Failed to generate PDF" }));
+                throw new Error(errData.error || "Failed to generate the audit PDF");
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `NextCall-Audit-${(business.name || "business").replace(/[^a-z0-9]+/gi, "-")}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            toast.success("Audit PDF downloaded");
+        } catch (err) {
+            toast.error("PDF download failed", getErrorMessage(err));
+            logger.error("[ProspectDetail] Audit PDF download failed:", getErrorMessage(err));
+        } finally {
+            setIsDownloadingPdf(false);
+        }
+    };
+
     if (isLoading) return <div className="p-8 text-center text-gray-500">Loading prospect details...</div>;
     if (!data) return (
         <div className="p-8 text-center">
@@ -678,7 +713,25 @@ export default function ProspectDetailClient({ prospectId }: { prospectId: strin
                     {/* Audit Card — always at the top so the freshest audit is the first thing you see */}
                     {audit && (
                         <Card>
-                            <CardHeader><CardTitle className="text-sm">Digital Presence Audit</CardTitle></CardHeader>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                                <CardTitle className="text-sm">Digital Presence Audit</CardTitle>
+                                {aiReport && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={handleDownloadAuditPdf}
+                                        disabled={isDownloadingPdf}
+                                        className="gap-1.5 rounded-lg"
+                                    >
+                                        {isDownloadingPdf ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                            <Download className="h-3.5 w-3.5" />
+                                        )}
+                                        {isDownloadingPdf ? "Building…" : "Audit PDF"}
+                                    </Button>
+                                )}
+                            </CardHeader>
                             <CardContent>
                                 <div className="flex justify-between items-center mb-4">
                                     <span className="nc-gradient-text text-4xl font-bold">{audit.overallScore}<span className="text-lg text-gray-400">/100</span></span>
