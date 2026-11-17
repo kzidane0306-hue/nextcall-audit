@@ -112,6 +112,18 @@ const NICHE_GROUPS: Array<{ label: string; options: string[] }> = [
         ],
     },
     {
+        label: "Pet care & supplies",
+        options: [
+            "Pet Store",
+            "Pet Supplies",
+            "Pet Food Store",
+            "Pet Boarding",
+            "Dog Training",
+            "Pet Sitting",
+            "Aquarium Shop",
+        ],
+    },
+    {
         label: "Food & hospitality",
         options: [
             "Restaurant",
