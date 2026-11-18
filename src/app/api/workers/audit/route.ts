@@ -78,13 +78,13 @@ async function runPass(workerId: string): Promise<PassSummary> {
   // here means the operator's next screenshot is read in ~1.5s. The ping runs
   // in the background; the pass waits for it only right before the first AI
   // call — the queue bookkeeping in between needs no AI.
-  const warmPromise = warmRouter(8_000);
-  let warmAwaited = false;
+  // The router warm-up is LAZY: it fires only when a job is actually about to
+  // touch AI. A pass with no jobs used to ping the router's /models catalog
+  // every minute anyway — the single biggest line on the bandwidth bill.
+  let warmPromise: Promise<boolean> | null = null;
   const awaitWarm = async (): Promise<void> => {
-    if (!warmAwaited) {
-      warmAwaited = true;
-      await warmPromise;
-    }
+    if (!warmPromise) warmPromise = warmRouter(8_000);
+    await warmPromise;
   };
 
   const requeued = await jobQueueService.requeueStale();

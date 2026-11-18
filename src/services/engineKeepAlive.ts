@@ -37,7 +37,10 @@ export function startEngineKeepAlive(): void {
           return;
         }
 
-        await fetch(`${baseUrl}/login`, { method: "GET" }).catch(() => undefined);
+        // HEAD: the idle timer reset must never download a rendered page —
+        // the app router answers with headers only, so the ping costs ~0
+        // egress (a full GET of /login was bandwidth for nothing).
+        await fetch(`${baseUrl}/login`, { method: "HEAD" }).catch(() => undefined);
         logger.info("[EngineKeepAlive] Engine ON — keep-alive ping sent.");
       } catch (error) {
         logger.warn("[EngineKeepAlive] Keep-alive tick failed:", getErrorMessage(error));
