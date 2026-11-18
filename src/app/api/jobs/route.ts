@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { jobQueueService } from "@/services/jobQueueService";
+import { runWorkerPass } from "@/services/auditWorkerPass";
 import { logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -8,6 +9,11 @@ import { getErrorMessage } from "@/lib/errors";
  * The queue, for the screenshot page.
  *
  * GET  — the newest jobs plus per-status counts (the panel polls this).
+ *        Each poll also PIGGYBACKS a worker pass via after(): the operator's
+ *        open dashboard is the machine's heartbeat on Vercel, where there is
+ *        no always-on process. The pass is engine-gated and single-flighted
+ *        (see auditWorkerPass.ts), so a poll while the engine is OFF costs a
+ *        quick check and nothing more.
  * POST — put a DEAD job back in the queue after the operator fixed the cause.
  */
 
@@ -21,6 +27,17 @@ export async function GET() {
       jobQueueService.listRecent(15),
       jobQueueService.stats(),
     ]);
+
+    // The piggyback: the dashboard poll just became a worker heartbeat. The
+    // pass runs after the response leaves (the panel must never wait for it),
+    // it gates itself on the engine, and overlapping triggers share one pass.
+    after(async () => {
+      try {
+        await runWorkerPass({ workerId: `dashboard-${Date.now()}` });
+      } catch (error) {
+        logger.error("[API /jobs] Piggyback pass failed:", getErrorMessage(error));
+      }
+    });
 
     return NextResponse.json({
       jobs: jobs.map((job) => ({
