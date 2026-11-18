@@ -173,6 +173,14 @@ export default function ScreenshotClient() {
   const [send, setSend] = useState<SendTelemetry | null>(null);
   const [clock, setClock] = useState("");
 
+  /**
+   * Adaptive polling: while a job is queued or running the console refreshes
+   * fast (the live machine feel), and when it is idle the polls drop to a
+   * slow tick. On Vercel every invocation is billed CPU, and an idle console
+   * polling at 20s was a third of the month's CPU budget.
+   */
+  const [fastPoll, setFastPoll] = useState(false);
+
   const googleInputRef = useRef<HTMLInputElement>(null);
   const facebookInputRef = useRef<HTMLInputElement>(null);
   /** Re-armed whenever a screenshot is added/changed; spent by the auto-queue. */
@@ -190,6 +198,7 @@ export default function ScreenshotClient() {
       const data = (await response.json()) as { jobs: JobRow[]; stats: QueueStats };
       setJobs(data.jobs ?? []);
       setStats(data.stats ?? EMPTY_STATS);
+      setFastPoll(Boolean(data.stats && data.stats.QUEUED + data.stats.RUNNING > 0));
       setQueueError(null);
     } catch (err) {
       setQueueError(getErrorMessage(err));
@@ -233,21 +242,22 @@ export default function ScreenshotClient() {
     // The queue poll is the console's heartbeat; the settings read is slow and
     // rarely changes, so it rides a longer interval to spare the free-tier DB.
     // Both polls pause while the tab is hidden — a hidden tab is not working,
-    // and every poll is a billed serverless wake-up.
+    // and every poll is a billed serverless wake-up. The intervals adapt to
+    // real work: fast while a job is in flight, slow while idle.
     const queueTimer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void loadQueue();
-    }, 20_000);
+    }, fastPoll ? 20_000 : 90_000);
     const sendTimer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void loadSendState();
-    }, 30_000);
+    }, fastPoll ? 60_000 : 180_000);
     return () => {
       clearTimeout(initial);
       clearInterval(queueTimer);
       clearInterval(sendTimer);
     };
-  }, [loadQueue, loadSendState]);
+  }, [loadQueue, loadSendState, fastPoll]);
 
   // "Dispatching" is a time window, not a stored flag — it is refreshed on
   // the clock tick so the render itself stays pure (no Date.now() inline).
